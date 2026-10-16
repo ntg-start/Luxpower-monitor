@@ -1,0 +1,871 @@
+# ============================================================================
+#  VLux-Monitor  —  ESPHome cho CYD 2.8" (ESP32-2432S028R)
+#  Dongle Luxpower qua TCP (component luxpower_tcp) + UI LVGL 2 trang
+#  Chạm vào màn hình để chuyển trang.
+# ============================================================================
+
+substitutions:
+  name: vlux-monitor
+  friendly_name: "VLux-Monitor"
+  # ---- Bảng màu (đổi ở đây để đổi toàn bộ theme) ----
+  col_bg:      "0x0B1220"   # nền
+  col_card:    "0x182235"   # thẻ
+  col_card2:   "0x1F2C44"   # thẻ phụ / rãnh arc
+  col_pv:      "0x22C55E"   # xanh lá  - PV
+  col_grid:    "0xF59E0B"   # cam      - lưới
+  col_load:    "0x38BDF8"   # xanh dương - tải
+  col_batt:    "0xA78BFA"   # tím      - pin
+  col_text:    "0xF1F5F9"   # chữ chính
+  col_muted:   "0x8A9BB4"   # chữ phụ
+  col_bad:     "0xEF4444"   # đỏ - mất kết nối
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on: backlight
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ----------------------------------------------------------------------------
+#  WiFi + Captive portal (độc lập, không cần Home Assistant)
+# ----------------------------------------------------------------------------
+wifi:
+  ap:
+    ssid: ${friendly_name}
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  auth:
+    type: basic
+    username: !secret web_user
+    password: !secret web_password
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Asia/Ho_Chi_Minh
+
+# ----------------------------------------------------------------------------
+#  Màn hình ILI9341 + cảm ứng XPT2046 (CYD dùng 2 bus SPI riêng)
+# ----------------------------------------------------------------------------
+spi:
+  - id: tft_bus
+    clk_pin: 14
+    mosi_pin: 13
+    miso_pin: 12
+  - id: touch_bus
+    clk_pin: 25
+    mosi_pin: 32
+    miso_pin: 39
+
+output:
+  - platform: ledc
+    pin: 21
+    id: backlight_output
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: "Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+display:
+  - platform: mipi_spi
+    model: ESP32-2432S028-7789   # CYD bản USB-C + Micro-USB -> chip ST7789V
+    id: main_display
+    spi_id: tft_bus
+    auto_clear_enabled: false
+    update_interval: never     # LVGL điều khiển vẽ
+    # Nếu màu âm bản: thêm  invert_colors: true
+    # Nếu ảnh bị lật:  thêm  transform: {mirror_x: true}  hoặc mirror_y
+
+touchscreen:
+  - platform: xpt2046
+    id: main_touch
+    spi_id: touch_bus
+    cs_pin: 33
+    interrupt_pin: 36
+    update_interval: 50ms
+    threshold: 400
+    calibration:              # chỉnh nếu chạm lệch
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    transform:
+      swap_xy: false      # không xoay màn
+      mirror_x: false
+      mirror_y: false
+
+# ----------------------------------------------------------------------------
+#  Dữ liệu từ dongle Luxpower
+# ----------------------------------------------------------------------------
+luxpower_tcp:
+  id: lux
+  port: 8000                 # xác nhận từ firmware gốc (DAT_400d0538 = 0x1F40)
+  update_interval: 3s
+  # host / dongle_serial / inverter_serial đều KHÔNG bắt buộc:
+  #   - bỏ trống  -> tự quét LAN tìm dongle, tự học 2 serial từ frame dongle đẩy ra,
+  #                  rồi nhớ vào flash cho lần sau (giống firmware gốc)
+  #   - điền vào  -> dùng thẳng, bỏ qua bước dò (nhanh hơn)
+  # host: 192.168.1.50
+  # dongle_serial: "BA12345678"
+  # inverter_serial: "1234567890"
+
+  dongle_ip_text:
+    name: "Dongle IP"
+    id: t_ip
+    on_value:
+      - lvgl.label.update:
+          id: d_ip
+          text: !lambda 'return x;'
+  dongle_sn_text:
+    name: "Dongle SN"
+    id: t_dsn
+    on_value:
+      - lvgl.label.update:
+          id: d_dsn
+          text: !lambda 'return x;'
+  inverter_sn_text:
+    name: "Inverter SN"
+    id: t_isn
+    on_value:
+      - lvgl.label.update:
+          id: d_isn
+          text: !lambda 'return x;'
+
+  online:
+    name: "Dongle Online"
+    id: dongle_online
+    on_state:
+      - if:
+          condition:
+            lambda: 'return x;'
+          then:
+            - lvgl.label.update:
+                id: lbl_link
+                text: "LIVE"
+                text_color: ${col_pv}
+          else:
+            - lvgl.label.update:
+                id: lbl_link
+                text: "OFFLINE"
+                text_color: ${col_bad}
+
+  pv_power:
+    name: "PV Power"
+    id: pv_power
+    on_value:
+      - lambda: 'id(last_data_ms) = millis();'
+      - lvgl.label.update:
+          id: lbl_pv
+          text: !lambda 'return str_sprintf("%.0f W", x);'
+  battery_soc:
+    name: "Battery SOC"
+    id: battery_soc
+    on_value:
+      - lvgl.arc.update:
+          id: arc_soc
+          value: !lambda 'return x;'
+      - lvgl.label.update:
+          id: lbl_soc
+          text: !lambda 'return str_sprintf("%.0f%%", x);'
+  battery_voltage:
+    name: "Battery Voltage"
+    id: battery_voltage
+    on_value:
+      - lvgl.label.update:
+          id: lbl_vbat
+          text: !lambda 'return str_sprintf("%.1f V", x);'
+      - lvgl.label.update:
+          id: d_vbat
+          text: !lambda 'return str_sprintf("%.1f V", x);'
+  battery_power:
+    name: "Battery Power"
+    id: battery_power
+    on_value:
+      - lvgl.label.update:
+          id: lbl_batt_pw
+          text: !lambda |-
+            return str_sprintf("%s %.0f W", x >= 0 ? "CHG" : "DIS", x < 0 ? -x : x);
+  grid_power:
+    name: "Grid Power"
+    id: grid_power
+    on_value:
+      - lvgl.label.update:
+          id: lbl_grid
+          text: !lambda 'return str_sprintf("%.0f W", x < 0 ? -x : x);'
+  load_power:
+    name: "Load Power"
+    id: load_power
+    on_value:
+      - lvgl.label.update:
+          id: lbl_load
+          text: !lambda 'return str_sprintf("%.0f W", x);'
+  grid_voltage:
+    name: "Grid Voltage"
+    id: grid_voltage
+    on_value:
+      - lvgl.label.update:
+          id: d_gv
+          text: !lambda 'return str_sprintf("%.1f V", x);'
+  grid_freq:
+    name: "Grid Frequency"
+    id: grid_freq
+    on_value:
+      - lvgl.label.update:
+          id: d_gf
+          text: !lambda 'return str_sprintf("%.2f Hz", x);'
+  pv_today:
+    name: "PV Today"
+    id: pv_today
+    on_value:
+      - lvgl.label.update:
+          id: lbl_today
+          text: !lambda 'return str_sprintf("%.1f kWh", x);'
+  pv1_power:
+    name: "PV1 Power"
+    id: pv1_power
+    on_value:
+      - lvgl.label.update:
+          id: d_pv1
+          text: !lambda 'return str_sprintf("%.0f W", x);'
+  pv2_power:
+    name: "PV2 Power"
+    id: pv2_power
+    on_value:
+      - lvgl.label.update:
+          id: d_pv2
+          text: !lambda 'return str_sprintf("%.0f W", x);'
+  grid_import_today:
+    name: "Grid Import Today"
+    id: grid_import_today
+    on_value:
+      - lvgl.label.update:
+          id: d_imp
+          text: !lambda 'return str_sprintf("%.1f kWh", x);'
+  grid_export_today:
+    name: "Grid Export Today"
+    id: grid_export_today
+    on_value:
+      - lvgl.label.update:
+          id: d_exp
+          text: !lambda 'return str_sprintf("%.1f kWh", x);'
+  frames_total:
+    name: "Data Frames"
+    id: frames_total
+  temp_inner:
+    name: "Inverter Temp"
+    id: temp_inner
+    on_value:
+      - lvgl.label.update:
+          id: d_temp
+          text: !lambda 'return str_sprintf("%.1f C", x);'
+
+number:
+  - platform: template
+    name: "Reconnect gap ms"
+    id: num_gap
+    optimistic: true
+    min_value: 200
+    max_value: 30000
+    step: 100
+    initial_value: 1000
+    restore_value: true
+    set_action:
+      - lambda: 'id(lux)->set_reconnect_gap((uint32_t) x);'
+
+globals:
+  - id: last_data_ms
+    type: uint32_t
+    initial_value: '0'
+
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: debug
+    free:
+      name: "Free Heap"
+      id: free_heap
+
+binary_sensor:
+  - platform: status
+    name: "Device Status"
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP"
+      id: wifi_ip
+      on_value:
+        - lvgl.label.update:
+            id: d_wifi
+            text: !lambda 'return std::string("WiFi: ") + x;'
+
+# ----------------------------------------------------------------------------
+#  Giao diện LVGL — 2 trang, chạm để chuyển
+# ----------------------------------------------------------------------------
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - main_touch
+  # KHÔNG xoay: panel CYD 2.8" là khổ dọc 240x320 (xoay bằng phần mềm làm chữ dựng đứng)
+  bg_color: ${col_bg}
+
+  style_definitions:
+    - id: card
+      bg_color: ${col_card}
+      bg_opa: COVER
+      radius: 12
+      border_width: 0
+      pad_all: 6
+      text_color: ${col_text}
+    - id: card_sm
+      bg_color: ${col_card}
+      bg_opa: COVER
+      radius: 10
+      border_width: 0
+      pad_all: 5
+      text_color: ${col_text}
+    - id: topbar
+      bg_color: ${col_card2}
+      bg_opa: COVER
+      radius: 0
+      border_width: 0
+      pad_all: 0
+
+  pages:
+    # ======================= TRANG 1: TỔNG QUAN =======================
+    - id: page_main
+      bg_color: ${col_bg}
+      widgets:
+        - obj:
+            styles: topbar
+            x: 0
+            y: 0
+            width: 240
+            height: 24
+            widgets:
+              - label:
+                  text: "VLux-Monitor"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: LEFT_MID
+                  x: 6
+              - label:
+                  id: lbl_link
+                  text: "..."
+                  text_color: ${col_muted}
+                  text_font: montserrat_12
+                  align: RIGHT_MID
+                  x: -48
+              - label:
+                  id: lbl_clock
+                  text: "--:--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_14
+                  align: RIGHT_MID
+                  x: -6
+
+        # ---- Vòng cung SOC ----
+        - arc:
+            id: arc_soc
+            x: 58
+            y: 28
+            width: 124
+            height: 124
+            min_value: 0
+            max_value: 100
+            value: 0
+            arc_width: 12
+            arc_color: ${col_card2}
+            indicator:
+              arc_color: ${col_pv}
+              arc_width: 12
+            knob:
+              bg_opa: TRANSP
+        - label:
+            id: lbl_vbat
+            text: "-- V"
+            text_color: ${col_batt}
+            text_font: montserrat_14
+            align: TOP_MID
+            y: 58
+        - label:
+            id: lbl_soc
+            text: "--%"
+            text_color: ${col_text}
+            text_font: montserrat_30
+            align: TOP_MID
+            y: 76
+        - label:
+            text: "SOC"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: TOP_MID
+            y: 112
+
+        # ---- 3 thẻ công suất (xếp dọc) ----
+        - obj:
+            styles: card
+            x: 10
+            y: 158
+            width: 220
+            height: 38
+            widgets:
+              - label:
+                  text: "PV"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: LEFT_MID
+              - label:
+                  id: lbl_pv
+                  text: "-- W"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: RIGHT_MID
+        - obj:
+            styles: card
+            x: 10
+            y: 198
+            width: 220
+            height: 38
+            widgets:
+              - label:
+                  text: "GRID"
+                  text_color: ${col_grid}
+                  text_font: montserrat_12
+                  align: LEFT_MID
+              - label:
+                  id: lbl_grid
+                  text: "-- W"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: RIGHT_MID
+        - obj:
+            styles: card
+            x: 10
+            y: 238
+            width: 220
+            height: 38
+            widgets:
+              - label:
+                  text: "LOAD"
+                  text_color: ${col_load}
+                  text_font: montserrat_12
+                  align: LEFT_MID
+              - label:
+                  id: lbl_load
+                  text: "-- W"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: RIGHT_MID
+
+        # ---- Hàng dưới ----
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 278
+            width: 108
+            height: 32
+            widgets:
+              - label:
+                  text: "BATT"
+                  text_color: ${col_batt}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: lbl_batt_pw
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 122
+            y: 278
+            width: 108
+            height: 32
+            widgets:
+              - label:
+                  text: "TODAY"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: lbl_today
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: BOTTOM_RIGHT
+
+        - label:
+            text: "1/3"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: BOTTOM_MID
+            y: -1
+
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 320
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next:
+
+    # ======================= TRANG 2: CHI TIẾT =======================
+    - id: page_detail
+      bg_color: ${col_bg}
+      widgets:
+        - obj:
+            styles: topbar
+            x: 0
+            y: 0
+            width: 240
+            height: 24
+            widgets:
+              - label:
+                  text: "Chi tiet"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: LEFT_MID
+                  x: 6
+              - label:
+                  id: lbl_clock2
+                  text: "--:--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_14
+                  align: RIGHT_MID
+                  x: -6
+
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 30
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "GRID V"
+                  text_color: ${col_grid}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_gv
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 122
+            y: 30
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "GRID Hz"
+                  text_color: ${col_grid}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_gf
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 92
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "PV1"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_pv1
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 122
+            y: 92
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "PV2"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_pv2
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 154
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "IMPORT"
+                  text_color: ${col_grid}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_imp
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_16
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 122
+            y: 154
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "EXPORT"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_exp
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_16
+                  align: BOTTOM_RIGHT
+
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 216
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "BATT V"
+                  text_color: ${col_batt}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_vbat
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 122
+            y: 216
+            width: 108
+            height: 56
+            widgets:
+              - label:
+                  text: "TEMP"
+                  text_color: ${col_load}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_temp
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_18
+                  align: BOTTOM_RIGHT
+
+        - label:
+            text: "2/3"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: BOTTOM_MID
+            y: -1
+
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 320
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next:
+
+    # ======================= TRANG 3: KẾT NỐI =======================
+    - id: page_info
+      bg_color: ${col_bg}
+      widgets:
+        - obj:
+            styles: topbar
+            x: 0
+            y: 0
+            width: 240
+            height: 24
+            widgets:
+              - label:
+                  text: "Ket noi"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: LEFT_MID
+                  x: 6
+              - label:
+                  id: lbl_clock3
+                  text: "--:--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_14
+                  align: RIGHT_MID
+                  x: -6
+
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 34
+            width: 220
+            height: 56
+            widgets:
+              - label:
+                  text: "DONGLE IP"
+                  text_color: ${col_load}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_ip
+                  text: "dang do..."
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 100
+            width: 220
+            height: 56
+            widgets:
+              - label:
+                  text: "DONGLE SN"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_dsn
+                  text: "dang hoc..."
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+        - obj:
+            styles: card_sm
+            x: 10
+            y: 166
+            width: 220
+            height: 56
+            widgets:
+              - label:
+                  text: "INVERTER SN"
+                  text_color: ${col_batt}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: d_isn
+                  text: "dang hoc..."
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+
+        - label:
+            id: d_wifi
+            text: "WiFi: --"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: TOP_LEFT
+            x: 12
+            y: 232
+        - label:
+            id: d_age
+            text: "Du lieu: --"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: TOP_LEFT
+            x: 12
+            y: 252
+
+        - label:
+            text: "3/3"
+            text_color: ${col_muted}
+            text_font: montserrat_12
+            align: BOTTOM_MID
+            y: -1
+
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 320
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next:
+
+
+# Đồng hồ trên các trang
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          auto t = id(sntp_time).now();
+          std::string s = t.is_valid() ? str_sprintf("%02d:%02d", t.hour, t.minute)
+                                       : std::string("--:--");
+          lv_label_set_text(id(lbl_clock), s.c_str());
+          lv_label_set_text(id(lbl_clock2), s.c_str());
+          lv_label_set_text(id(lbl_clock3), s.c_str());
+          // tuổi dữ liệu -> biết ngay dongle có đang đẩy không
+          if (id(last_data_ms) != 0) {
+            uint32_t age = (millis() - id(last_data_ms)) / 1000;
+            lv_label_set_text(id(d_age), str_sprintf("Du lieu: %u giay truoc",
+                              (unsigned) age).c_str());
+          }
