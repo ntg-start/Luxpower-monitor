@@ -7,11 +7,15 @@ viết lại bằng **ESPHome + LVGL** với giao diện hiện đại, thay cho
 - **Nguồn dữ liệu:** kết nối tới **dongle WiFi Luxpower** trên cùng mạng LAN, đọc thanh ghi
   qua giao thức **LXP over TCP** (component `luxpower_tcp` tự viết — port lại từ firmware gốc).
 - **Chạy độc lập:** có **captive portal** để khai báo WiFi; không cần Home Assistant.
-- **Giao diện:** LVGL – dashboard tối **2 trang** (chạm màn hình để chuyển):
-  - *Trang 1 – Tổng quan:* vòng cung SOC pin, thẻ PV / GRID / LOAD, pin & kWh hôm nay,
-    đèn trạng thái `LIVE`/`OFFLINE`.
-  - *Trang 2 – Chi tiết:* điện áp & tần số lưới, PV1/PV2, điện mua/bán hôm nay,
-    áp pin, nhiệt độ.
+- **Giao diện:** LVGL, 3 trang (chạm màn hình để chuyển):
+  - **Trang 1 — Tổng quan:** 2 donut `PRODUCTION` / `CONSUMPTION` ở trên; dưới là sơ đồ
+    dòng điện `TOTAL PV → BATTERY | LUX | GRID → HOME` với **chấm sáng chạy** trên dây nối
+    (chiều theo dấu công suất, ẩn khi < 20 W) và **nút công suất lớn nhất được tô đậm**
+    (viền dày 4px + số trắng sáng).
+  - **Trang 2 — Chi tiết:** áp/tần số lưới, PV1/PV2, điện mua/bán hôm nay, áp pin, nhiệt độ.
+  - **Trang 3 — Kết nối:** IP dongle, 2 serial, IP WiFi, tuổi dữ liệu.
+  - Giao diện dùng **tiếng Anh** và font `montserrat` dựng sẵn của LVGL (không cần font ngoài).
+    Tránh ký tự ngoài ASCII như `·` — sẽ hiện ô vuông.
 
 ### Kiến trúc component (quan trọng)
 
@@ -198,8 +202,26 @@ Chi tiết khác:
 - Dongle đóng kết nối sau vài giây; cứ nối lại, không phải lỗi.
 
 ### Hiệu năng thực đo
-`update_interval: 3s` + `RECONNECT_GAP_MS = 1000` cho **~1.1 giây/lần cập nhật**
+`update_interval: 3s` + `reconnect_gap = 1000ms` cho **~1.1 giây/lần cập nhật**
 (54 frame/phút), chạy ổn định không reboot.
+
+Có entity `Reconnect gap ms` chỉnh được lúc chạy qua web để dò lại nếu dongle khác:
+```
+curl -u admin:PASS -X POST -d "" \
+  "http://<ip>/number/Reconnect%20gap%20ms/set?value=1000"
+```
+
+### Lỗi đã gặp — đừng lặp lại
+- **Crash `LoadProhibited`:** `send_next_request_()` có thể gọi `close_socket_()` khi ghi lỗi
+  (dongle đóng kết nối đúng lúc), làm `sock_ = nullptr`; dòng ngay sau gọi `pump_rx_()` →
+  deref NULL → reboot ~1 phút/lần. Luôn kiểm tra `sock_` sau khi gửi.
+- **`getpeername()` trên lwIP KHÔNG có nghĩa là đã bắt tay xong** — nó trả về thành công ngay
+  khi vừa gửi SYN. Phải chờ (~250ms) rồi mới gửi request, và khi quét mạng chỉ nhận một IP
+  khi nó thực sự gửi byte `A1 1A`.
+- **Panic chỉ hiện trên cổng serial**, không hiện trong log qua mạng. Khi ESP32 reboot không
+  rõ lý do, cắm USB đọc backtrace ngay thay vì đoán.
+- **Màn hình:** board CYD bản **USB-C + Micro-USB** dùng chip **ST7789V** (không phải ILI9341).
+  Panel là **dọc 240x320**, đặt LVGL `rotation: 90` sẽ làm nhiễu toàn màn.
 
 
 ## Giấy phép / lưu ý
