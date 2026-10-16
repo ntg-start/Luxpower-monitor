@@ -7,14 +7,22 @@ viết lại bằng **ESPHome + LVGL** với giao diện hiện đại, thay cho
 - **Nguồn dữ liệu:** kết nối tới **dongle WiFi Luxpower** trên cùng mạng LAN, đọc thanh ghi
   qua giao thức **LXP over TCP** (component `luxpower_tcp` tự viết — port lại từ firmware gốc).
 - **Chạy độc lập:** có **captive portal** để khai báo WiFi; không cần Home Assistant.
-- **Giao diện:** LVGL, 2 trang (chạm màn hình để chuyển):
-  - **Trang 1 — Tổng quan:** 2 donut `PRODUCTION` / `CONSUMPTION` ở trên; dưới là sơ đồ
-    dòng điện `TOTAL PV → BATTERY | LUX | GRID → HOME` với **chấm sáng chạy** trên dây nối
+- **Giao diện:** LVGL, 2 trang chính + 1 trang chờ.
+  - **Trang 1 — Power flow:** 2 donut `PRODUCTION` / `CONSUMPTION`; dưới là sơ đồ
+    `TOTAL PV → BATTERY | LUX | GRID → HOME` với **chấm sáng chạy** trên dây nối
     (chiều theo dấu công suất, ẩn khi < 20 W) và **nút công suất lớn nhất được tô đậm**
-    (viền dày 4px + số trắng sáng).
-  - **Trang 2 — Chi tiết:** lưới 2×4 cùng kiểu thẻ với trang 1 — GRID V/Hz, PV1/PV2,
-    IMPORT/EXPORT, BATTERY V/TEMP. IP dongle và 2 serial xem trên web (không chiếm màn hình).
-  - Giao diện dùng **tiếng Anh** và font `montserrat` dựng sẵn của LVGL (không cần font ngoài).
+    (viền 4px + số trắng sáng).
+  - **Trang 2 — Details:** lưới 2×4 — GRID V/Hz, PV1/PV2, IMPORT/EXPORT, BATTERY V/TEMP.
+  - **Trang chờ:** tự hiện sau **10 giây** không chạm, chạm để quay lại trang 1.
+    - **Đồng hồ LED 7 thanh thật** — mỗi chữ số là 7 thanh LVGL riêng (44×76 px),
+      thanh tắt vẫn hiện mờ như đèn LED thật; hai chấm nhấp nháy mỗi giây;
+      số giây nhỏ màu vàng.
+    - **Trái:** icon thời tiết (nắng / có mây / tối) **suy từ công suất PV** — không cần
+      dịch vụ ngoài — kèm thứ trong tuần.
+    - **Phải:** ngày dương lịch và **âm lịch Việt Nam** (thuật toán Hồ Ngọc Đức trong
+      `lunar.h`, tính ngay trên ESP32; đã đối chiếu đúng Tết 2025 và 2026).
+    - Dưới: 4 thẻ GRID / BATTERY / HOME / PV.
+  - Giao diện dùng **tiếng Anh** + font `montserrat` dựng sẵn của LVGL (không cần font ngoài).
     Tránh ký tự ngoài ASCII như `·` — sẽ hiện ô vuông.
 
 ### Kiến trúc component (quan trọng)

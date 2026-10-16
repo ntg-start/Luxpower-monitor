@@ -22,6 +22,12 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
+  includes:
+    - lunar.h
+  # bảng 7 thanh: bit a=0 b=1 c=2 d=3 e=4 f=5 g=6
+  project:
+    name: vlux.monitor
+    version: "2.0"
   on_boot:
     priority: -100
     then:
@@ -176,9 +182,18 @@ luxpower_tcp:
       - lvgl.label.update:
           id: lbl_pv
           text: !lambda 'return str_sprintf("%.2f kW", x / 1000.0f);'
+      - lvgl.label.update:
+          id: i_pv
+          text: !lambda |-
+            return (x >= 1000.0f) ? str_sprintf("%.2f kW", x / 1000.0f)
+                                  : str_sprintf("%.0f W", x);
   battery_soc:
     name: "Battery SOC"
     id: battery_soc
+    on_value:
+      - lvgl.label.update:
+          id: i_batt
+          text: !lambda 'return str_sprintf("%.0f%%", x);'
   battery_voltage:
     name: "Battery Voltage"
     id: battery_voltage
@@ -209,12 +224,23 @@ luxpower_tcp:
       - lvgl.label.update:
           id: lbl_grid
           text: !lambda 'return str_sprintf("%.0f W", x);'
+      - lvgl.label.update:
+          id: i_grid
+          text: !lambda |-
+            float a = x < 0 ? -x : x;
+            return (a >= 1000.0f) ? str_sprintf("%.2f kW", x / 1000.0f)
+                                  : str_sprintf("%.0f W", x);
   load_power:
     name: "Load Power"
     id: load_power
     on_value:
       - lvgl.label.update:
           id: lbl_home
+          text: !lambda |-
+            return (x >= 1000.0f) ? str_sprintf("%.2f kW", x / 1000.0f)
+                                  : str_sprintf("%.0f W", x);
+      - lvgl.label.update:
+          id: i_home
           text: !lambda |-
             return (x >= 1000.0f) ? str_sprintf("%.2f kW", x / 1000.0f)
                                   : str_sprintf("%.0f W", x);
@@ -368,6 +394,10 @@ text_sensor:
 #  Giao diện LVGL — 2 trang, chạm để chuyển
 # ----------------------------------------------------------------------------
 lvgl:
+  on_idle:
+    timeout: 10s
+    then:
+      - lvgl.page.show: page_idle
   displays:
     - main_display
   touchscreens:
@@ -1008,6 +1038,731 @@ lvgl:
             on_click:
               - lvgl.page.next:
 
+    # ======================= TRANG CHỜ =======================
+    - id: page_idle
+      skip: true
+      bg_color: "0x05070A"
+      widgets:
+        # ---- đồng hồ LED ----
+        - obj:
+            id: s0a
+            x: 24
+            y: 24
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0b
+            x: 52
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0c
+            x: 52
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0d
+            x: 24
+            y: 92
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0e
+            x: 16
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0f
+            x: 16
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s0g
+            x: 24
+            y: 58
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1a
+            x: 74
+            y: 24
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1b
+            x: 102
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1c
+            x: 102
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1d
+            x: 74
+            y: 92
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1e
+            x: 66
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1f
+            x: 66
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s1g
+            x: 74
+            y: 58
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2a
+            x: 140
+            y: 24
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2b
+            x: 168
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2c
+            x: 168
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2d
+            x: 140
+            y: 92
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2e
+            x: 132
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2f
+            x: 132
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s2g
+            x: 140
+            y: 58
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3a
+            x: 190
+            y: 24
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3b
+            x: 218
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3c
+            x: 218
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3d
+            x: 190
+            y: 92
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3e
+            x: 182
+            y: 66
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3f
+            x: 182
+            y: 32
+            width: 8
+            height: 26
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: s3g
+            x: 190
+            y: 58
+            width: 28
+            height: 8
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: col0
+            x: 117
+            y: 48
+            width: 8
+            height: 8
+            radius: 4
+            bg_color: "0x33E0FF"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: col1
+            x: 117
+            y: 76
+            width: 8
+            height: 8
+            radius: 4
+            bg_color: "0x33E0FF"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0a
+            x: 194
+            y: 104
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0b
+            x: 204
+            y: 108
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0c
+            x: 204
+            y: 121
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0d
+            x: 194
+            y: 130
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0e
+            x: 190
+            y: 121
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0f
+            x: 190
+            y: 108
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t0g
+            x: 194
+            y: 117
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1a
+            x: 218
+            y: 104
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1b
+            x: 228
+            y: 108
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1c
+            x: 228
+            y: 121
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1d
+            x: 218
+            y: 130
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1e
+            x: 214
+            y: 121
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1f
+            x: 214
+            y: 108
+            width: 4
+            height: 9
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: t1g
+            x: 218
+            y: 117
+            width: 10
+            height: 4
+            radius: 2
+            bg_color: "0x14202B"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+
+        # ---- ngày dương / âm ----
+        # ---- icon thời tiết (suy từ công suất PV) ----
+        - obj:
+            id: w_r1
+            x: 28
+            y: 137
+            width: 4
+            height: 7
+            radius: 2
+            bg_color: "0xFFC107"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_r2
+            x: 28
+            y: 178
+            width: 4
+            height: 7
+            radius: 2
+            bg_color: "0xFFC107"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_r3
+            x: 7
+            y: 159
+            width: 7
+            height: 4
+            radius: 2
+            bg_color: "0xFFC107"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_r4
+            x: 46
+            y: 159
+            width: 7
+            height: 4
+            radius: 2
+            bg_color: "0xFFC107"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_disc
+            x: 16
+            y: 147
+            width: 28
+            height: 28
+            radius: 14
+            bg_color: "0xFFC107"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_c1
+            x: 12
+            y: 162
+            width: 18
+            height: 18
+            radius: 9
+            bg_color: "0x9AA7B5"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_c2
+            x: 26
+            y: 158
+            width: 22
+            height: 22
+            radius: 11
+            bg_color: "0xB6C2CF"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_c3
+            x: 12
+            y: 171
+            width: 36
+            height: 10
+            radius: 5
+            bg_color: "0xB6C2CF"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - label:
+            id: i_dow
+            text: "---"
+            text_color: ${col_text}
+            text_font: montserrat_18
+            align: TOP_LEFT
+            x: 58
+            y: 154
+
+        - label:
+            id: i_date
+            text: "--/--/----"
+            text_color: ${col_text}
+            text_font: montserrat_16
+            align: TOP_RIGHT
+            x: -8
+            y: 146
+        - label:
+            id: i_lunar
+            text: "--"
+            text_color: "0xFFC107"
+            text_font: montserrat_14
+            align: TOP_RIGHT
+            x: -8
+            y: 168
+
+        - obj:
+            x: 40
+            y: 186
+            width: 160
+            height: 2
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+            pad_all: 0
+
+        # ---- 4 thẻ số liệu ----
+        - obj:
+            x: 4
+            y: 194
+            width: 114
+            height: 60
+            radius: 12
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_muted}
+            pad_all: 6
+            widgets:
+              - label:
+                  text: "GRID"
+                  text_color: ${col_muted}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: i_grid
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+        - obj:
+            x: 122
+            y: 194
+            width: 114
+            height: 60
+            radius: 12
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_grid}
+            pad_all: 6
+            widgets:
+              - label:
+                  text: "BATTERY"
+                  text_color: ${col_grid}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: i_batt
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+        - obj:
+            x: 4
+            y: 258
+            width: 114
+            height: 60
+            radius: 12
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_bad}
+            pad_all: 6
+            widgets:
+              - label:
+                  text: "HOME"
+                  text_color: ${col_bad}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: i_home
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+        - obj:
+            x: 122
+            y: 258
+            width: 114
+            height: 60
+            radius: 12
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_pv}
+            pad_all: 6
+            widgets:
+              - label:
+                  text: "PV"
+                  text_color: ${col_pv}
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+              - label:
+                  id: i_pv
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_20
+                  align: BOTTOM_RIGHT
+
+        # chạm để mở trang flow
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 320
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - lvgl.page.show: page_main
+
 # Hoạt hình dòng điện + đồng hồ
 interval:
   - interval: 120ms
@@ -1048,6 +1803,69 @@ interval:
   - interval: 1s
     then:
       - lambda: |-
+          // ---- Trang chờ: đồng hồ LED 7 thanh + ngày dương/âm ----
+          {
+            auto t = id(sntp_time).now();
+            if (t.is_valid()) {
+              // bit: a=0 b=1 c=2 d=3 e=4 f=5 g=6
+              lv_obj_t *HM[4][7] = {
+                {id(s0a),id(s0b),id(s0c),id(s0d),id(s0e),id(s0f),id(s0g)},
+                {id(s1a),id(s1b),id(s1c),id(s1d),id(s1e),id(s1f),id(s1g)},
+                {id(s2a),id(s2b),id(s2c),id(s2d),id(s2e),id(s2f),id(s2g)},
+                {id(s3a),id(s3b),id(s3c),id(s3d),id(s3e),id(s3f),id(s3g)}};
+              lv_obj_t *SS[2][7] = {
+                {id(t0a),id(t0b),id(t0c),id(t0d),id(t0e),id(t0f),id(t0g)},
+                {id(t1a),id(t1b),id(t1c),id(t1d),id(t1e),id(t1f),id(t1g)}};
+              auto draw = [](lv_obj_t **seg, int val, uint32_t on) {
+                uint8_t m = SEG_TBL[val % 10];
+                for (int i = 0; i < 7; i++)
+                  lv_obj_set_style_bg_color(seg[i],
+                      lv_color_hex(((m >> i) & 1) ? on : 0x14202B), 0);
+              };
+              int hh = t.hour, mi = t.minute, ss = t.second;
+              draw(HM[0], hh / 10, 0x33E0FF);
+              draw(HM[1], hh % 10, 0x33E0FF);
+              draw(HM[2], mi / 10, 0x33E0FF);
+              draw(HM[3], mi % 10, 0x33E0FF);
+              draw(SS[0], ss / 10, 0xFFC107);
+              draw(SS[1], ss % 10, 0xFFC107);
+              // hai chấm nhấp nháy mỗi giây
+              uint32_t cc = (ss % 2) ? 0x14202B : 0x33E0FF;
+              lv_obj_set_style_bg_color(id(col0), lv_color_hex(cc), 0);
+              lv_obj_set_style_bg_color(id(col1), lv_color_hex(cc), 0);
+
+              // thứ trong tuần
+              static const char *DOW[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+              int dw = t.day_of_week - 1;
+              if (dw < 0 || dw > 6) dw = 0;
+              lv_label_set_text(id(i_dow), DOW[dw]);
+
+              // icon thời tiết suy từ công suất PV
+              {
+                float pvw = id(pv_power).has_state() ? id(pv_power).state : 0.0f;
+                bool sunny  = pvw > 800.0f;
+                bool cloudy = pvw > 50.0f && pvw <= 800.0f;
+                auto vis = [](lv_obj_t *o, bool on) {
+                  if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+                  else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+                };
+                vis(id(w_r1), sunny); vis(id(w_r2), sunny);
+                vis(id(w_r3), sunny); vis(id(w_r4), sunny);
+                vis(id(w_c1), cloudy); vis(id(w_c2), cloudy); vis(id(w_c3), cloudy);
+                lv_obj_set_style_bg_color(id(w_disc),
+                    lv_color_hex(sunny ? 0xFFC107 : (cloudy ? 0xD8A200 : 0x5A6B7D)), 0);
+              }
+
+              lv_label_set_text(id(i_date),
+                  str_sprintf("%02d/%02d/%04d", t.day_of_month, t.month, t.year).c_str());
+              int ld, lm, ly, leap;
+              vnlunar::solar_to_lunar(t.day_of_month, t.month, t.year, ld, lm, ly, leap);
+              lv_label_set_text(id(i_lunar),
+                  str_sprintf("AL %d/%d%s  %s", ld, lm, leap ? "N" : "",
+                              vnlunar::can_chi(ly).c_str()).c_str());
+            }
+          }
+
           // ---- Làm nổi bật nút có công suất lớn nhất ----
           auto ab = [](sensor::Sensor *se){ float v = se->has_state() ? se->state : 0.0f;
                                             return v < 0 ? -v : v; };
