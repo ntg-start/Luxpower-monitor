@@ -146,17 +146,9 @@ luxpower_tcp:
   dongle_sn_text:
     name: "Dongle SN"
     id: t_dsn
-    on_value:
-      - lvgl.label.update:
-          id: d_dsn
-          text: !lambda 'return x;'
   inverter_sn_text:
     name: "Inverter SN"
     id: t_isn
-    on_value:
-      - lvgl.label.update:
-          id: d_isn
-          text: !lambda 'return x;'
 
   online:
     name: "Dongle Online"
@@ -370,10 +362,7 @@ text_sensor:
     ip_address:
       name: "IP"
       id: wifi_ip
-      on_value:
-        - lvgl.label.update:
-            id: d_wifi
-            text: !lambda 'return std::string("WiFi: ") + x;'
+
 
 # ----------------------------------------------------------------------------
 #  Giao diện LVGL — 2 trang, chạm để chuyển
@@ -753,19 +742,22 @@ lvgl:
               - label:
                   text: "HOME"
                   text_color: ${col_bad}
-                  text_font: montserrat_10
-                  align: TOP_MID
-              - label:
-                  id: lbl_home
-                  text: "--"
-                  text_color: ${col_bad}
-                  text_font: montserrat_16
-                  align: CENTER
+                  text_font: montserrat_12
+                  align: TOP_LEFT
+                  x: 2
               - label:
                   text: "ESSENTIAL"
                   text_color: ${col_muted}
                   text_font: montserrat_10
-                  align: BOTTOM_MID
+                  align: BOTTOM_LEFT
+                  x: 2
+              - label:
+                  id: lbl_home
+                  text: "--"
+                  text_color: ${col_bad}
+                  text_font: montserrat_20
+                  align: RIGHT_MID
+                  x: -4
 
         - label:
             id: lbl_link
@@ -795,185 +787,214 @@ lvgl:
             clickable: true
             on_click:
               - lvgl.page.next:
-    # ======================= TRANG 2: CHI TIẾT =======================
+    # ======================= TRANG 2: DETAILS =======================
     - id: page_detail
       bg_color: ${col_bg}
       widgets:
         - obj:
-            styles: topbar
-            x: 0
-            y: 0
-            width: 240
-            height: 24
-            widgets:
-              - label:
-                  text: "Chi tiet"
-                  text_color: ${col_text}
-                  text_font: montserrat_14
-                  align: LEFT_MID
-                  x: 6
-              - label:
-                  id: lbl_clock2
-                  text: "--:--"
-                  text_color: ${col_muted}
-                  text_font: montserrat_14
-                  align: RIGHT_MID
-                  x: -6
-
-        - obj:
-            styles: card_sm
-            x: 10
-            y: 30
-            width: 108
-            height: 56
+            x: 4
+            y: 4
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "GRID V"
                   text_color: ${col_grid}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_gv
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
         - obj:
-            styles: card_sm
             x: 122
-            y: 30
-            width: 108
-            height: 56
+            y: 4
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "GRID Hz"
                   text_color: ${col_grid}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_gf
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
 
         - obj:
-            styles: card_sm
-            x: 10
-            y: 92
-            width: 108
-            height: 56
+            x: 4
+            y: 74
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "PV1"
                   text_color: ${col_pv}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_pv1
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
         - obj:
-            styles: card_sm
             x: 122
-            y: 92
-            width: 108
-            height: 56
+            y: 74
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "PV2"
                   text_color: ${col_pv}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_pv2
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
 
         - obj:
-            styles: card_sm
-            x: 10
-            y: 154
-            width: 108
-            height: 56
+            x: 4
+            y: 144
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "IMPORT"
                   text_color: ${col_grid}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_imp
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_16
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
         - obj:
-            styles: card_sm
             x: 122
-            y: 154
-            width: 108
-            height: 56
+            y: 144
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "EXPORT"
                   text_color: ${col_pv}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_exp
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_16
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
 
         - obj:
-            styles: card_sm
-            x: 10
-            y: 216
-            width: 108
-            height: 56
+            x: 4
+            y: 214
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
-                  text: "BATT V"
+                  text: "BATTERY V"
                   text_color: ${col_batt}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_vbat
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
         - obj:
-            styles: card_sm
             x: 122
-            y: 216
-            width: 108
-            height: 56
+            y: 214
+            width: 114
+            height: 66
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 6
             widgets:
               - label:
                   text: "TEMP"
                   text_color: ${col_load}
-                  text_font: montserrat_12
+                  text_font: montserrat_10
                   align: TOP_LEFT
               - label:
                   id: d_temp
                   text: "--"
                   text_color: ${col_text}
                   text_font: montserrat_18
-                  align: BOTTOM_RIGHT
+                  align: CENTER
+                  y: 6
 
         - label:
-            text: "2/3"
+            id: d_ip
+            text: "--"
             text_color: ${col_muted}
-            text_font: montserrat_12
-            align: BOTTOM_MID
-            y: -1
+            text_font: montserrat_10
+            align: BOTTOM_LEFT
+            x: 6
+            y: -2
+        - label:
+            id: lbl_clock2
+            text: "--:--"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+            align: BOTTOM_RIGHT
+            x: -6
+            y: -2
 
         - obj:
             x: 0
@@ -986,123 +1007,6 @@ lvgl:
             clickable: true
             on_click:
               - lvgl.page.next:
-
-    # ======================= TRANG 3: KẾT NỐI =======================
-    - id: page_info
-      bg_color: ${col_bg}
-      widgets:
-        - obj:
-            styles: topbar
-            x: 0
-            y: 0
-            width: 240
-            height: 24
-            widgets:
-              - label:
-                  text: "Ket noi"
-                  text_color: ${col_text}
-                  text_font: montserrat_14
-                  align: LEFT_MID
-                  x: 6
-              - label:
-                  id: lbl_clock3
-                  text: "--:--"
-                  text_color: ${col_muted}
-                  text_font: montserrat_14
-                  align: RIGHT_MID
-                  x: -6
-
-        - obj:
-            styles: card_sm
-            x: 10
-            y: 34
-            width: 220
-            height: 56
-            widgets:
-              - label:
-                  text: "DONGLE IP"
-                  text_color: ${col_load}
-                  text_font: montserrat_12
-                  align: TOP_LEFT
-              - label:
-                  id: d_ip
-                  text: "dang do..."
-                  text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: BOTTOM_RIGHT
-        - obj:
-            styles: card_sm
-            x: 10
-            y: 100
-            width: 220
-            height: 56
-            widgets:
-              - label:
-                  text: "DONGLE SN"
-                  text_color: ${col_pv}
-                  text_font: montserrat_12
-                  align: TOP_LEFT
-              - label:
-                  id: d_dsn
-                  text: "dang hoc..."
-                  text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: BOTTOM_RIGHT
-        - obj:
-            styles: card_sm
-            x: 10
-            y: 166
-            width: 220
-            height: 56
-            widgets:
-              - label:
-                  text: "INVERTER SN"
-                  text_color: ${col_batt}
-                  text_font: montserrat_12
-                  align: TOP_LEFT
-              - label:
-                  id: d_isn
-                  text: "dang hoc..."
-                  text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: BOTTOM_RIGHT
-
-        - label:
-            id: d_wifi
-            text: "WiFi: --"
-            text_color: ${col_muted}
-            text_font: montserrat_12
-            align: TOP_LEFT
-            x: 12
-            y: 232
-        - label:
-            id: d_age
-            text: "Du lieu: --"
-            text_color: ${col_muted}
-            text_font: montserrat_12
-            align: TOP_LEFT
-            x: 12
-            y: 252
-
-        - label:
-            text: "3/3"
-            text_color: ${col_muted}
-            text_font: montserrat_12
-            align: BOTTOM_MID
-            y: -1
-
-        - obj:
-            x: 0
-            y: 0
-            width: 240
-            height: 320
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
-            clickable: true
-            on_click:
-              - lvgl.page.next:
-
 
 # Hoạt hình dòng điện + đồng hồ
 interval:
@@ -1171,10 +1075,3 @@ interval:
                                        : std::string("--:--");
           lv_label_set_text(id(lbl_clock), s.c_str());
           lv_label_set_text(id(lbl_clock2), s.c_str());
-          lv_label_set_text(id(lbl_clock3), s.c_str());
-          // tuổi dữ liệu -> biết ngay dongle có đang đẩy không
-          if (id(last_data_ms) != 0) {
-            uint32_t age = (millis() - id(last_data_ms)) / 1000;
-            lv_label_set_text(id(d_age), str_sprintf("Du lieu: %u giay truoc",
-                              (unsigned) age).c_str());
-          }

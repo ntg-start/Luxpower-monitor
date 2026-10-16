@@ -7,13 +7,13 @@ viết lại bằng **ESPHome + LVGL** với giao diện hiện đại, thay cho
 - **Nguồn dữ liệu:** kết nối tới **dongle WiFi Luxpower** trên cùng mạng LAN, đọc thanh ghi
   qua giao thức **LXP over TCP** (component `luxpower_tcp` tự viết — port lại từ firmware gốc).
 - **Chạy độc lập:** có **captive portal** để khai báo WiFi; không cần Home Assistant.
-- **Giao diện:** LVGL, 3 trang (chạm màn hình để chuyển):
+- **Giao diện:** LVGL, 2 trang (chạm màn hình để chuyển):
   - **Trang 1 — Tổng quan:** 2 donut `PRODUCTION` / `CONSUMPTION` ở trên; dưới là sơ đồ
     dòng điện `TOTAL PV → BATTERY | LUX | GRID → HOME` với **chấm sáng chạy** trên dây nối
     (chiều theo dấu công suất, ẩn khi < 20 W) và **nút công suất lớn nhất được tô đậm**
     (viền dày 4px + số trắng sáng).
-  - **Trang 2 — Chi tiết:** áp/tần số lưới, PV1/PV2, điện mua/bán hôm nay, áp pin, nhiệt độ.
-  - **Trang 3 — Kết nối:** IP dongle, 2 serial, IP WiFi, tuổi dữ liệu.
+  - **Trang 2 — Chi tiết:** lưới 2×4 cùng kiểu thẻ với trang 1 — GRID V/Hz, PV1/PV2,
+    IMPORT/EXPORT, BATTERY V/TEMP. IP dongle và 2 serial xem trên web (không chiếm màn hình).
   - Giao diện dùng **tiếng Anh** và font `montserrat` dựng sẵn của LVGL (không cần font ngoài).
     Tránh ký tự ngoài ASCII như `·` — sẽ hiện ô vuông.
 
