@@ -57,6 +57,7 @@ captive_portal:
 web_server:
   port: 80
   version: 3
+  log: false          # tắt stream log -> nhẹ tài nguyên
   auth:
     type: basic
     username: !secret web_user
@@ -182,24 +183,14 @@ luxpower_tcp:
       - lambda: 'id(last_data_ms) = millis();'
       - lvgl.label.update:
           id: lbl_pv
-          text: !lambda 'return str_sprintf("%.0f W", x);'
+          text: !lambda 'return str_sprintf("%.2f kW", x / 1000.0f);'
   battery_soc:
     name: "Battery SOC"
     id: battery_soc
-    on_value:
-      - lvgl.arc.update:
-          id: arc_soc
-          value: !lambda 'return x;'
-      - lvgl.label.update:
-          id: lbl_soc
-          text: !lambda 'return str_sprintf("%.0f%%", x);'
   battery_voltage:
     name: "Battery Voltage"
     id: battery_voltage
     on_value:
-      - lvgl.label.update:
-          id: lbl_vbat
-          text: !lambda 'return str_sprintf("%.1f V", x);'
       - lvgl.label.update:
           id: d_vbat
           text: !lambda 'return str_sprintf("%.1f V", x);'
@@ -208,23 +199,33 @@ luxpower_tcp:
     id: battery_power
     on_value:
       - lvgl.label.update:
-          id: lbl_batt_pw
+          id: lbl_batt
           text: !lambda |-
-            return str_sprintf("%s %.0f W", x >= 0 ? "CHG" : "DIS", x < 0 ? -x : x);
+            float a = x < 0 ? -x : x;
+            return (a >= 1000.0f) ? str_sprintf("%+.2f kW", x / 1000.0f)
+                                  : str_sprintf("%+.0f W", x);
+      - lvgl.label.update:
+          id: lbl_batt_sub
+          text: !lambda |-
+            int soc = id(battery_soc).has_state() ? (int) id(battery_soc).state : 0;
+            const char *st = (x > 20) ? "CHARGE" : ((x < -20) ? "DISCHG" : "IDLE");
+            return str_sprintf("%d%% %s", soc, st);
   grid_power:
     name: "Grid Power"
     id: grid_power
     on_value:
       - lvgl.label.update:
           id: lbl_grid
-          text: !lambda 'return str_sprintf("%.0f W", x < 0 ? -x : x);'
+          text: !lambda 'return str_sprintf("%.0f W", x);'
   load_power:
     name: "Load Power"
     id: load_power
     on_value:
       - lvgl.label.update:
-          id: lbl_load
-          text: !lambda 'return str_sprintf("%.0f W", x);'
+          id: lbl_home
+          text: !lambda |-
+            return (x >= 1000.0f) ? str_sprintf("%.2f kW", x / 1000.0f)
+                                  : str_sprintf("%.0f W", x);
   grid_voltage:
     name: "Grid Voltage"
     id: grid_voltage
@@ -239,13 +240,16 @@ luxpower_tcp:
       - lvgl.label.update:
           id: d_gf
           text: !lambda 'return str_sprintf("%.2f Hz", x);'
+      - lvgl.label.update:
+          id: lbl_grid_sub
+          text: !lambda |-
+            float v = id(grid_voltage).has_state() ? id(grid_voltage).state : 0.0f;
+            return str_sprintf("%.0fV %.0fHz", v, x);
   pv_today:
     name: "PV Today"
     id: pv_today
     on_value:
-      - lvgl.label.update:
-          id: lbl_today
-          text: !lambda 'return str_sprintf("%.1f kWh", x);'
+      - script.execute: upd_donuts
   pv1_power:
     name: "PV1 Power"
     id: pv1_power
@@ -253,6 +257,11 @@ luxpower_tcp:
       - lvgl.label.update:
           id: d_pv1
           text: !lambda 'return str_sprintf("%.0f W", x);'
+      - lvgl.label.update:
+          id: lbl_pv12
+          text: !lambda |-
+            float p2 = id(pv2_power).has_state() ? id(pv2_power).state : 0.0f;
+            return str_sprintf("PV1 %.0f W    PV2 %.0f W", x, p2);
   pv2_power:
     name: "PV2 Power"
     id: pv2_power
@@ -260,6 +269,16 @@ luxpower_tcp:
       - lvgl.label.update:
           id: d_pv2
           text: !lambda 'return str_sprintf("%.0f W", x);'
+  charge_today:
+    name: "Charge Today"
+    id: charge_today
+    on_value:
+      - script.execute: upd_donuts
+  discharge_today:
+    name: "Discharge Today"
+    id: discharge_today
+    on_value:
+      - script.execute: upd_donuts
   grid_import_today:
     name: "Grid Import Today"
     id: grid_import_today
@@ -267,6 +286,7 @@ luxpower_tcp:
       - lvgl.label.update:
           id: d_imp
           text: !lambda 'return str_sprintf("%.1f kWh", x);'
+      - script.execute: upd_donuts
   grid_export_today:
     name: "Grid Export Today"
     id: grid_export_today
@@ -274,16 +294,26 @@ luxpower_tcp:
       - lvgl.label.update:
           id: d_exp
           text: !lambda 'return str_sprintf("%.1f kWh", x);'
+      - script.execute: upd_donuts
   frames_total:
     name: "Data Frames"
     id: frames_total
+  temp_radiator:
+    name: "Radiator Temp"
+    id: temp_radiator
   temp_inner:
     name: "Inverter Temp"
     id: temp_inner
     on_value:
+      - script.execute: upd_donuts
       - lvgl.label.update:
           id: d_temp
-          text: !lambda 'return str_sprintf("%.1f C", x);'
+          text: !lambda 'return str_sprintf("%.0f C", x);'
+      - lvgl.label.update:
+          id: lbl_inv_sub
+          text: !lambda |-
+            float r = id(temp_radiator).has_state() ? id(temp_radiator).state : 0.0f;
+            return str_sprintf("DC %.0f  AC %.0f", x, r);
 
 number:
   - platform: template
@@ -298,19 +328,38 @@ number:
     set_action:
       - lambda: 'id(lux)->set_reconnect_gap((uint32_t) x);'
 
+script:
+  - id: upd_donuts
+    then:
+      - lambda: |-
+          auto g = [](sensor::Sensor *s){ return s->has_state() ? s->state : 0.0f; };
+          float pv  = g(id(pv_today));
+          float dis = g(id(discharge_today));
+          float chg = g(id(charge_today));
+          float imp = g(id(grid_import_today));
+          float exp_= g(id(grid_export_today));
+          float prod = pv + dis;                       // sản xuất = PV + xả pin
+          float load = pv + dis + imp - chg - exp_;    // tải = cân bằng năng lượng
+          if (load < 0) load = 0;
+          float cons = chg + load;                     // tiêu thụ = sạc pin + tải
+          int pvp  = prod > 0.05f ? (int) (pv  * 100.0f / prod + 0.5f) : 0;
+          int pinp = cons > 0.05f ? (int) (chg * 100.0f / cons + 0.5f) : 0;
+          lv_label_set_text(id(lbl_prod), str_sprintf("%.1f", prod).c_str());
+          lv_label_set_text(id(lbl_prod_sub),
+              str_sprintf("PV %d%%  BAT %d%%", pvp, 100 - pvp).c_str());
+          lv_arc_set_value(id(arc_prod), pvp);
+          lv_label_set_text(id(lbl_cons), str_sprintf("%.1f", cons).c_str());
+          lv_label_set_text(id(lbl_cons_sub),
+              str_sprintf("BAT %d%%  LOAD %d%%", pinp, 100 - pinp).c_str());
+          lv_arc_set_value(id(arc_cons), pinp);
+
 globals:
+  - id: anim_phase
+    type: int
+    initial_value: '0'
   - id: last_data_ms
     type: uint32_t
     initial_value: '0'
-
-debug:
-  update_interval: 30s
-
-sensor:
-  - platform: debug
-    free:
-      name: "Free Heap"
-      id: free_heap
 
 binary_sensor:
   - platform: status
@@ -360,176 +409,380 @@ lvgl:
       pad_all: 0
 
   pages:
-    # ======================= TRANG 1: TỔNG QUAN =======================
+    # ======================= TRANG 1: DONUT + POWER FLOW =======================
     - id: page_main
       bg_color: ${col_bg}
       widgets:
+        # ---------- Donut PRODUCTION ----------
         - obj:
-            styles: topbar
-            x: 0
-            y: 0
-            width: 240
-            height: 24
+            x: 4
+            y: 3
+            width: 114
+            height: 86
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 2
             widgets:
               - label:
-                  text: "VLux-Monitor"
+                  text: "PRODUCTION"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: TOP_MID
+              - arc:
+                  id: arc_prod
+                  align: TOP_MID
+                  y: 11
+                  width: 52
+                  height: 52
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  arc_width: 7
+                  arc_color: ${col_grid}
+                  indicator:
+                    arc_color: ${col_pv}
+                    arc_width: 7
+                  knob:
+                    bg_opa: TRANSP
+              - label:
+                  id: lbl_prod
+                  text: "--"
                   text_color: ${col_text}
-                  text_font: montserrat_14
-                  align: LEFT_MID
-                  x: 6
+                  text_font: montserrat_16
+                  align: TOP_MID
+                  y: 25
               - label:
-                  id: lbl_link
-                  text: "..."
+                  text: "kWh"
                   text_color: ${col_muted}
-                  text_font: montserrat_12
-                  align: RIGHT_MID
-                  x: -48
+                  text_font: montserrat_10
+                  align: TOP_MID
+                  y: 43
               - label:
-                  id: lbl_clock
-                  text: "--:--"
+                  id: lbl_prod_sub
+                  text: "--"
                   text_color: ${col_muted}
-                  text_font: montserrat_14
-                  align: RIGHT_MID
-                  x: -6
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
 
-        # ---- Vòng cung SOC ----
-        - arc:
-            id: arc_soc
-            x: 58
-            y: 28
-            width: 124
-            height: 124
-            min_value: 0
-            max_value: 100
-            value: 0
-            arc_width: 12
-            arc_color: ${col_card2}
-            indicator:
-              arc_color: ${col_pv}
-              arc_width: 12
-            knob:
-              bg_opa: TRANSP
-        - label:
-            id: lbl_vbat
-            text: "-- V"
-            text_color: ${col_batt}
-            text_font: montserrat_14
-            align: TOP_MID
-            y: 58
-        - label:
-            id: lbl_soc
-            text: "--%"
-            text_color: ${col_text}
-            text_font: montserrat_30
-            align: TOP_MID
-            y: 76
-        - label:
-            text: "SOC"
-            text_color: ${col_muted}
-            text_font: montserrat_12
-            align: TOP_MID
-            y: 112
-
-        # ---- 3 thẻ công suất (xếp dọc) ----
+        # ---------- Donut CONSUMPTION ----------
         - obj:
-            styles: card
-            x: 10
-            y: 158
-            width: 220
-            height: 38
+            x: 122
+            y: 3
+            width: 114
+            height: 86
+            radius: 10
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 2
             widgets:
               - label:
-                  text: "PV"
-                  text_color: ${col_pv}
-                  text_font: montserrat_12
-                  align: LEFT_MID
+                  text: "CONSUMPTION"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: TOP_MID
+              - arc:
+                  id: arc_cons
+                  align: TOP_MID
+                  y: 11
+                  width: 52
+                  height: 52
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  arc_width: 7
+                  arc_color: ${col_load}
+                  indicator:
+                    arc_color: ${col_grid}
+                    arc_width: 7
+                  knob:
+                    bg_opa: TRANSP
+              - label:
+                  id: lbl_cons
+                  text: "--"
+                  text_color: ${col_text}
+                  text_font: montserrat_16
+                  align: TOP_MID
+                  y: 25
+              - label:
+                  text: "kWh"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: TOP_MID
+                  y: 43
+              - label:
+                  id: lbl_cons_sub
+                  text: "--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
+
+        # ---------- TOTAL PV ----------
+        - obj:
+            id: box_pv
+            x: 58
+            y: 96
+            width: 124
+            height: 46
+            radius: 8
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_pv}
+            pad_all: 2
+            widgets:
+              - label:
+                  text: "TOTAL PV"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: TOP_MID
               - label:
                   id: lbl_pv
-                  text: "-- W"
+                  text: "-- kW"
                   text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: RIGHT_MID
+                  text_font: montserrat_18
+                  align: CENTER
+                  y: 2
+              - label:
+                  id: lbl_mppt
+                  text: "2 MPPT"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
+
+        - label:
+            id: lbl_pv12
+            text: "PV1 -- W    PV2 -- W"
+            text_color: ${col_pv}
+            text_font: montserrat_10
+            align: TOP_MID
+            y: 144
+
+        # ---------- duong noi doc PV -> inverter (dai de chay hoat hinh) ----------
         - obj:
-            styles: card
-            x: 10
-            y: 198
-            width: 220
-            height: 38
+            x: 119
+            y: 158
+            width: 2
+            height: 20
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+            pad_all: 0
+        - obj:
+            id: dot_pv
+            x: 117
+            y: 158
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: ${col_pv}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+
+        # ---------- BATTERY | Luxpower | HOME ----------
+        - obj:
+            id: box_batt
+            x: 2
+            y: 180
+            width: 66
+            height: 52
+            radius: 8
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_grid}
+            pad_all: 2
+            widgets:
+              - label:
+                  text: "BATTERY"
+                  text_color: ${col_grid}
+                  text_font: montserrat_10
+                  align: TOP_MID
+              - label:
+                  id: lbl_batt
+                  text: "--"
+                  text_color: ${col_grid}
+                  text_font: montserrat_14
+                  align: CENTER
+              - label:
+                  id: lbl_batt_sub
+                  text: "--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
+        - obj:
+            x: 87
+            y: 180
+            width: 66
+            height: 52
+            radius: 8
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_load}
+            pad_all: 2
+            widgets:
+              - label:
+                  text: "LUX"
+                  text_color: ${col_load}
+                  text_font: montserrat_14
+                  align: TOP_MID
+              - label:
+                  id: lbl_inv_sub
+                  text: "--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: CENTER
+                  y: 6
+        - obj:
+            id: box_grid
+            x: 172
+            y: 180
+            width: 66
+            height: 52
+            radius: 8
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_muted}
+            pad_all: 2
             widgets:
               - label:
                   text: "GRID"
-                  text_color: ${col_grid}
-                  text_font: montserrat_12
-                  align: LEFT_MID
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: TOP_MID
               - label:
                   id: lbl_grid
                   text: "-- W"
                   text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: RIGHT_MID
-        - obj:
-            styles: card
-            x: 10
-            y: 238
-            width: 220
-            height: 38
-            widgets:
+                  text_font: montserrat_14
+                  align: CENTER
               - label:
-                  text: "LOAD"
-                  text_color: ${col_load}
-                  text_font: montserrat_12
-                  align: LEFT_MID
-              - label:
-                  id: lbl_load
-                  text: "-- W"
-                  text_color: ${col_text}
-                  text_font: montserrat_20
-                  align: RIGHT_MID
+                  id: lbl_grid_sub
+                  text: "--"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
 
-        # ---- Hàng dưới ----
+        # ---------- duong noi ngang ----------
         - obj:
-            styles: card_sm
-            x: 10
-            y: 278
-            width: 108
-            height: 32
+            x: 68
+            y: 205
+            width: 19
+            height: 2
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+            pad_all: 0
+        - obj:
+            id: dot_batt
+            x: 68
+            y: 203
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: ${col_grid}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            x: 153
+            y: 205
+            width: 19
+            height: 2
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+            pad_all: 0
+        - obj:
+            id: dot_home
+            x: 153
+            y: 203
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: ${col_bad}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+
+        # ---------- duong noi xuong GRID ----------
+        - obj:
+            x: 119
+            y: 232
+            width: 2
+            height: 20
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+            pad_all: 0
+        - obj:
+            id: dot_grid
+            x: 117
+            y: 232
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: ${col_grid}
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+
+        # ---------- GRID ----------
+        - obj:
+            id: box_home
+            x: 58
+            y: 252
+            width: 124
+            height: 44
+            radius: 8
+            bg_color: ${col_card}
+            bg_opa: COVER
+            border_width: 2
+            border_color: ${col_bad}
+            pad_all: 2
             widgets:
               - label:
-                  text: "BATT"
-                  text_color: ${col_batt}
-                  text_font: montserrat_12
-                  align: TOP_LEFT
+                  text: "HOME"
+                  text_color: ${col_bad}
+                  text_font: montserrat_10
+                  align: TOP_MID
               - label:
-                  id: lbl_batt_pw
+                  id: lbl_home
                   text: "--"
-                  text_color: ${col_text}
-                  text_font: montserrat_14
-                  align: BOTTOM_RIGHT
-        - obj:
-            styles: card_sm
-            x: 122
-            y: 278
-            width: 108
-            height: 32
-            widgets:
+                  text_color: ${col_bad}
+                  text_font: montserrat_16
+                  align: CENTER
               - label:
-                  text: "TODAY"
-                  text_color: ${col_pv}
-                  text_font: montserrat_12
-                  align: TOP_LEFT
-              - label:
-                  id: lbl_today
-                  text: "--"
-                  text_color: ${col_text}
-                  text_font: montserrat_14
-                  align: BOTTOM_RIGHT
+                  text: "ESSENTIAL"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: BOTTOM_MID
 
         - label:
-            text: "1/3"
+            id: lbl_link
+            text: ""
             text_color: ${col_muted}
-            text_font: montserrat_12
-            align: BOTTOM_MID
-            y: -1
+            text_font: montserrat_10
+            align: BOTTOM_LEFT
+            x: 6
+            y: -2
+        - label:
+            id: lbl_clock
+            text: "--:--"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+            align: BOTTOM_RIGHT
+            x: -6
+            y: -2
 
         - obj:
             x: 0
@@ -542,7 +795,6 @@ lvgl:
             clickable: true
             on_click:
               - lvgl.page.next:
-
     # ======================= TRANG 2: CHI TIẾT =======================
     - id: page_detail
       bg_color: ${col_bg}
@@ -852,11 +1104,68 @@ lvgl:
               - lvgl.page.next:
 
 
-# Đồng hồ trên các trang
+# Hoạt hình dòng điện + đồng hồ
 interval:
+  - interval: 120ms
+    then:
+      - lambda: |-
+          const int LEN = 20;                 // chiều dài đoạn chạy dọc
+          const int HLEN = 19;                // chiều dài đoạn chạy ngang
+          id(anim_phase) = (id(anim_phase) + 2) % LEN;
+          int p = id(anim_phase);
+          auto st = [](sensor::Sensor *s){ return s->has_state() ? s->state : 0.0f; };
+
+          auto show = [](lv_obj_t *o, bool on){
+            if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+            else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+
+          // PV -> inverter (luôn chảy xuống khi có PV)
+          float pv = st(id(pv_power));
+          show(id(dot_pv), pv > 20);
+          lv_obj_set_pos(id(dot_pv), 117, 158 + p);
+
+          // Pin <-> inverter: xả = chảy sang phải, sạc = chảy sang trái
+          float bp = st(id(battery_power));
+          int hp = p * HLEN / LEN;
+          show(id(dot_batt), bp > 20 || bp < -20);
+          lv_obj_set_pos(id(dot_batt), bp < 0 ? (68 + hp) : (87 - hp), 203);
+
+          // lưới <-> inverter (hàng giữa, bên phải): mua = chảy sang trái, bán = sang phải
+          float gp = st(id(grid_power));
+          show(id(dot_grid), gp > 20 || gp < -20);
+          lv_obj_set_pos(id(dot_grid), gp > 0 ? (172 - hp) : (153 + hp), 203);
+
+          // inverter -> nhà (dưới cùng): luôn chảy xuống khi có tải
+          float ld = st(id(load_power));
+          show(id(dot_home), ld > 20);
+          lv_obj_set_pos(id(dot_home), 117, 232 + p);
+
   - interval: 1s
     then:
       - lambda: |-
+          // ---- Làm nổi bật nút có công suất lớn nhất ----
+          auto ab = [](sensor::Sensor *se){ float v = se->has_state() ? se->state : 0.0f;
+                                            return v < 0 ? -v : v; };
+          float p_pv = ab(id(pv_power));
+          float p_bt = ab(id(battery_power));
+          float p_gd = ab(id(grid_power));
+          float p_hm = ab(id(load_power));
+          float mx = p_pv;
+          if (p_bt > mx) mx = p_bt;
+          if (p_gd > mx) mx = p_gd;
+          if (p_hm > mx) mx = p_hm;
+          auto hl = [](lv_obj_t *box, lv_obj_t *lbl, bool on){
+            lv_obj_set_style_border_width(box, on ? 4 : 2, 0);
+            lv_obj_set_style_text_color(lbl,
+                lv_color_hex(on ? 0xFFFFFF : 0x8A9BB4), 0);
+          };
+          bool any = mx > 20.0f;
+          hl(id(box_pv),   id(lbl_pv),   any && p_pv >= mx);
+          hl(id(box_batt), id(lbl_batt), any && p_bt >= mx);
+          hl(id(box_grid), id(lbl_grid), any && p_gd >= mx);
+          hl(id(box_home), id(lbl_home), any && p_hm >= mx);
+
           auto t = id(sntp_time).now();
           std::string s = t.is_valid() ? str_sprintf("%02d:%02d", t.hour, t.minute)
                                        : std::string("--:--");
