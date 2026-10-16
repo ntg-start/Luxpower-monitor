@@ -69,6 +69,12 @@ web_server:
     username: !secret web_user
     password: !secret web_password
 
+http_request:
+  id: http_cli
+  useragent: "esphome/vlux-monitor"
+  timeout: 10s
+  verify_ssl: false
+
 time:
   - platform: sntp
     id: sntp_time
@@ -372,6 +378,13 @@ script:
           lv_arc_set_value(id(arc_cons), pinp);
 
 globals:
+  # 0 = chua co du lieu (dung PV suy ra), 1 = nang, 2 = nhieu may, 3 = mua
+  - id: wx_code
+    type: int
+    initial_value: '0'
+  - id: wx_temp
+    type: int
+    initial_value: '0'
   - id: anim_phase
     type: int
     initial_value: '0'
@@ -1619,6 +1632,39 @@ lvgl:
             bg_opa: COVER
             border_width: 0
             pad_all: 0
+        - obj:
+            id: w_d1
+            x: 18
+            y: 182
+            width: 3
+            height: 8
+            radius: 2
+            bg_color: "0x38BDF8"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_d2
+            x: 28
+            y: 182
+            width: 3
+            height: 8
+            radius: 2
+            bg_color: "0x38BDF8"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+        - obj:
+            id: w_d3
+            x: 38
+            y: 182
+            width: 3
+            height: 8
+            radius: 2
+            bg_color: "0x38BDF8"
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
         - label:
             id: i_dow
             text: "---"
@@ -1626,7 +1672,15 @@ lvgl:
             text_font: montserrat_18
             align: TOP_LEFT
             x: 58
-            y: 154
+            y: 143
+        - label:
+            id: i_temp
+            text: "--"
+            text_color: "0xFFC107"
+            text_font: montserrat_16
+            align: TOP_LEFT
+            x: 58
+            y: 166
 
         - label:
             id: i_date
@@ -1765,6 +1819,32 @@ lvgl:
 
 # Hoạt hình dòng điện + đồng hồ
 interval:
+  - interval: 15min
+    startup_delay: 25s
+    then:
+      - http_request.get:
+          url: "http://wttr.in/?format=%t|%C"
+          capture_response: true
+          on_response:
+            then:
+              - lambda: |-
+                  if (response->status_code != 200 || body.empty()) return;
+                  std::string b = body;
+                  size_t bar = b.find('|');
+                  if (bar == std::string::npos) return;
+                  id(wx_temp) = atoi(b.substr(0, bar).c_str());
+                  std::string c = b.substr(bar + 1);
+                  for (auto &ch : c) ch = tolower(ch);
+                  int code = 2;                                   // mặc định: nhiều mây
+                  if (c.find("rain") != std::string::npos ||
+                      c.find("drizzle") != std::string::npos ||
+                      c.find("shower") != std::string::npos ||
+                      c.find("thunder") != std::string::npos) code = 3;
+                  else if (c.find("sun") != std::string::npos ||
+                           c.find("clear") != std::string::npos) code = 1;
+                  id(wx_code) = code;
+                  ESP_LOGI("weather", "%d C, %s -> code %d", id(wx_temp), c.c_str(), code);
+
   - interval: 120ms
     then:
       - lambda: |-
@@ -1842,18 +1922,30 @@ interval:
 
               // icon thời tiết suy từ công suất PV
               {
-                float pvw = id(pv_power).has_state() ? id(pv_power).state : 0.0f;
-                bool sunny  = pvw > 800.0f;
-                bool cloudy = pvw > 50.0f && pvw <= 800.0f;
+                bool sunny, cloudy, rainy = false;
+                if (id(wx_code) > 0) {                 // có dữ liệu từ internet
+                  sunny  = id(wx_code) == 1;
+                  cloudy = id(wx_code) == 2;
+                  rainy  = id(wx_code) == 3;
+                } else {                               // chưa có -> suy từ PV
+                  float pvw = id(pv_power).has_state() ? id(pv_power).state : 0.0f;
+                  sunny  = pvw > 800.0f;
+                  cloudy = pvw > 50.0f && pvw <= 800.0f;
+                }
                 auto vis = [](lv_obj_t *o, bool on) {
                   if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
                   else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
                 };
                 vis(id(w_r1), sunny); vis(id(w_r2), sunny);
                 vis(id(w_r3), sunny); vis(id(w_r4), sunny);
-                vis(id(w_c1), cloudy); vis(id(w_c2), cloudy); vis(id(w_c3), cloudy);
+                vis(id(w_c1), cloudy || rainy);
+                vis(id(w_c2), cloudy || rainy);
+                vis(id(w_c3), cloudy || rainy);
+                vis(id(w_d1), rainy); vis(id(w_d2), rainy); vis(id(w_d3), rainy);
                 lv_obj_set_style_bg_color(id(w_disc),
                     lv_color_hex(sunny ? 0xFFC107 : (cloudy ? 0xD8A200 : 0x5A6B7D)), 0);
+                if (id(wx_code) > 0)
+                  lv_label_set_text(id(i_temp), str_sprintf("%d C", id(wx_temp)).c_str());
               }
 
               lv_label_set_text(id(i_date),

@@ -17,8 +17,11 @@ viết lại bằng **ESPHome + LVGL** với giao diện hiện đại, thay cho
     - **Đồng hồ LED 7 thanh thật** — mỗi chữ số là 7 thanh LVGL riêng (44×76 px),
       thanh tắt vẫn hiện mờ như đèn LED thật; hai chấm nhấp nháy mỗi giây;
       số giây nhỏ màu vàng.
-    - **Trái:** icon thời tiết (nắng / có mây / tối) **suy từ công suất PV** — không cần
-      dịch vụ ngoài — kèm thứ trong tuần.
+    - **Trái:** icon thời tiết **lấy thật từ internet** + nhiệt độ ngoài trời + thứ trong tuần.
+      Dùng `wttr.in` (tự nhận vị trí theo IP, **không cần API key**, **HTTP thường nên không
+      tốn RAM cho TLS**), gọi mỗi 15 phút, phản hồi chỉ ~20 byte dạng `+25°C|Partly Cloudy`.
+      4 trạng thái: nắng / có mây / **mưa** (có giọt rơi) / tối.
+      Nếu chưa có mạng, icon **tự quay về suy từ công suất PV** nên màn hình không bao giờ trống.
     - **Phải:** ngày dương lịch và **âm lịch Việt Nam** (thuật toán Hồ Ngọc Đức trong
       `lunar.h`, tính ngay trên ESP32; đã đối chiếu đúng Tết 2025 và 2026).
     - Dưới: 4 thẻ GRID / BATTERY / HOME / PV.
