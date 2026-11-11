@@ -58,6 +58,8 @@ void LuxpowerTcp::setup() {
     c.ip[sizeof(c.ip) - 1] = 0;
     c.dongle_sn[sizeof(c.dongle_sn) - 1] = 0;
     c.inv_sn[sizeof(c.inv_sn) - 1] = 0;
+    if (c.ip[0])
+      this->cache_ip_ = c.ip;  // IP đã từng cho dữ liệu — luôn giữ làm phương án quay về
     if (this->active_ip_.empty() && c.ip[0])
       this->active_ip_ = c.ip;
     if (this->dongle_sn_.empty() && c.dongle_sn[0])
@@ -90,7 +92,9 @@ void LuxpowerTcp::dump_config() {
 
 void LuxpowerTcp::save_cache_() {
   LuxCache c{};
-  strncpy(c.ip, this->active_ip_.c_str(), sizeof(c.ip) - 1);
+  // Chỉ ghi IP đã THỰC SỰ cho dữ liệu, để một lần dò nhầm không xoá mất IP tốt trong flash
+  strncpy(c.ip, this->cache_ip_.empty() ? this->active_ip_.c_str() : this->cache_ip_.c_str(),
+          sizeof(c.ip) - 1);
   strncpy(c.dongle_sn, this->dongle_sn_.c_str(), sizeof(c.dongle_sn) - 1);
   strncpy(c.inv_sn, this->inv_sn_.c_str(), sizeof(c.inv_sn) - 1);
   c.port = this->cur_port_;
@@ -145,29 +149,40 @@ void LuxpowerTcp::send_next_request_() {
     return;
   if (!this->serials_known_() || !this->sock_)
     return;
-  // getpeername() trên lwIP báo "đã nối" ngay khi vừa gửi SYN, nên phải chờ
-  // bắt tay thực sự xong rồi mới hỏi — gửi sớm thì gói rơi mất.
-  if (millis() - this->connected_at_ < 250)
+  // Dongle chỉ giữ kết nối khoảng 1,1-1,5 giây rồi TỰ ĐÓNG, và nó không tự đẩy
+  // dữ liệu 0x04 — phải hỏi mới có. Nên:
+  //   * gửi ngay khi link chắc chắn đã established (đã nhận byte đầu tiên) thay vì
+  //     chờ một mốc thời gian cố định — getpeername() trên lwIP báo "đã nối" ngay
+  //     khi vừa gửi SYN nên không thể tin, nhưng byte nhận được thì không nói dối;
+  //   * gửi HẾT các bank trong CÙNG một vòng loop. Trên CYD có LVGL, mỗi vòng loop
+  //     có thể kéo dài hàng trăm ms — tách mỗi bank một vòng là trượt khỏi cửa sổ
+  //     1,3 giây và mất bank sau.
+  if (!this->link_ready_)
     return;
-  if (millis() - this->last_send_ < 80)
-    return;  // giãn nhẹ giữa 2 bank
-  uint8_t req[38];
-  size_t n = build_read_request_(req, BANKS[this->next_bank_].start, BANKS[this->next_bank_].count);
-  ssize_t w = this->sock_->write(req, n);
-  if (w < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK)
+  while (this->next_bank_ >= 0 && this->next_bank_ < NUM_BANKS) {
+    uint8_t req[38];
+    size_t n =
+        build_read_request_(req, BANKS[this->next_bank_].start, BANKS[this->next_bank_].count);
+    ssize_t w = this->sock_->write(req, n);
+    if (w < 0) {
+      // ENOTCONN/EINPROGRESS: lwIP báo "đã nối" qua getpeername ngay khi vừa gửi SYN,
+      // nên có thể tới đây trước khi bắt tay xong. Chưa mất bank nào — cứ thử lại
+      // vòng sau. Nếu thật sự không nối được thì NOT_DONGLE_MS sẽ dọn sau 8 giây.
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOTCONN ||
+          errno == EINPROGRESS || errno == EALREADY)
+        return;
+      ESP_LOGW(TAG, "write() lỗi errno=%d", errno);
+      this->close_socket_("lỗi gửi request");
       return;
-    this->close_socket_("lỗi gửi request");
-    return;
+    }
+    ESP_LOGV(TAG, "TX req bank=%d reg=%u cnt=%u w=%d", this->next_bank_,
+             BANKS[this->next_bank_].start, BANKS[this->next_bank_].count, (int) w);
+    this->last_send_ = millis();
+    if (++this->next_bank_ >= NUM_BANKS) {
+      this->next_bank_ = -1;
+      break;
+    }
   }
-  char hex[80];
-  for (int i = 0; i < 24; i++)
-    snprintf(hex + i * 3, 4, "%02x ", req[i]);
-  ESP_LOGV(TAG, "TX req bank=%d reg=%u cnt=%u w=%d : %s...", this->next_bank_,
-           BANKS[this->next_bank_].start, BANKS[this->next_bank_].count, (int) w, hex);
-  this->last_send_ = millis();
-  if (++this->next_bank_ >= NUM_BANKS)
-    this->next_bank_ = -1;
 }
 
 // ---------------------------------------------------------------- helpers ---
@@ -188,14 +203,48 @@ void LuxpowerTcp::close_socket_(const char *reason) {
     this->sock_ = nullptr;
     ESP_LOGW(TAG, "Đóng kết nối: %s", reason);
   }
+  // Phải đọc hai cờ này TRƯỚC khi xoá
+  bool was_connected = (this->state_ == State::CONNECTED);
+  bool silent = was_connected && !this->got_valid_frame_;
   this->state_ = State::IDLE;
   this->rx_len_ = 0;
   this->got_valid_frame_ = false;
+  this->link_ready_ = false;
+  if (was_connected) {
+    if (silent) {
+      if (this->silent_sessions_ < 8)
+        this->silent_sessions_++;
+    } else {
+      this->silent_sessions_ = 0;
+    }
+  }
+  // Dongle chỉ có ~5 socket (đo thực tế). Khi pool cạn — còn socket treo từ phiên
+  // trước (ESP32 mất điện đột ngột không gửi FIN) hoặc từ client khác — nó vẫn bắt
+  // tay TCP bình thường rồi ĐÓNG NGAY mà không gửi byte nào. Nối lại dồn dập lúc đó
+  // chỉ giữ cho nó cạn mãi; phải giãn dần để nó kịp thu hồi socket chết.
+  if (this->silent_sessions_ >= 3) {
+    uint32_t b = 1000u * (1u << (this->silent_sessions_ - 2));  // 2s,4s,8s... tối đa 60s
+    if (b > 60000u)
+      b = 60000u;
+    this->retry_after_ = millis() + b;
+    ESP_LOGW(TAG, "Dongle nhận kết nối nhưng im lặng %u lần liên tiếp — nhiều khả năng cạn "
+                  "socket, chờ %u ms cho nó hồi.",
+             this->silent_sessions_, (unsigned) b);
+    // Chặn kịch bản bám nhầm: một máy khác cũng mở cổng 8000 rồi đóng ngay sẽ giữ
+    // ta ở đây mãi. Im lặng quá nhiều lần mà chưa bao giờ cho dữ liệu -> bỏ IP,
+    // quay lại dò. Không áp dụng cho host khai trong YAML hay IP tốt trong flash.
+    if (this->silent_sessions_ >= 6 && !this->ever_got_data_ && this->cfg_host_.empty() &&
+        this->auto_discover_ && this->active_ip_ != this->cache_ip_) {
+      ESP_LOGW(TAG, "%s im lặng quá nhiều lần và chưa từng cho dữ liệu — dò lại.",
+               this->active_ip_.c_str());
+      this->active_ip_.clear();
+      this->silent_sessions_ = 0;
+    }
+    return;
+  }
   // Dongle Luxpower đóng kết nối sau mỗi vài frame — đó là hành vi BÌNH THƯỜNG.
   // Nếu IP này đã từng cho dữ liệu, nối lại ngay (1 giây), không backoff dài.
   if (this->ever_got_data_) {
-    // Dongle HF-A11 có rất ít socket; nối lại quá dồn làm nó chấp nhận rồi đóng ngay
-    // mà không gửi gì. Giãn nhịp ra để nó kịp giải phóng phiên cũ.
     this->retry_after_ = millis() + this->reconnect_gap_;
   } else {
     this->set_online_(false);
@@ -339,6 +388,7 @@ void LuxpowerTcp::scan_begin_() {
   }
   this->scan_skip_ = own;
   this->scan_next_ = 1;
+  this->cand_count_ = 0;
   this->port_tries_ = 0;
   this->scan_abort_();
   this->state_ = State::SCANNING;
@@ -376,11 +426,25 @@ void LuxpowerTcp::scan_step_() {
           size_t keep = (size_t) n < LUX_RX_BUF ? (size_t) n : LUX_RX_BUF;
           memcpy(this->rx_buf_, tmp, keep);
           this->rx_len_ = keep;
+          this->link_ready_ = true;  // đã có byte thật từ IP này
           this->drain_frames_();
           return;
         }
         ESP_LOGD(TAG, "%s mở cổng %u nhưng không phải Luxpower — bỏ qua", ip.c_str(),
                  this->cur_port_);
+        sl.sock->close();
+        sl.sock = nullptr;
+        sl.active = false;
+        continue;
+      }
+      if (n == 0) {
+        // read()==0 chỉ xảy ra khi phiên ĐÃ established rồi bị peer đóng. Nhận kết
+        // nối rồi đóng ngay mà không gửi byte nào chính là chữ ký của dongle đang
+        // cạn socket — không được kết luận "không phải Luxpower".
+        if ((size_t) this->cand_count_ < sizeof(this->cand_octets_))
+          this->cand_octets_[this->cand_count_++] = sl.octet;
+        ESP_LOGD(TAG, "%s%u nhận kết nối rồi đóng ngay (0 byte) — ghi làm ứng viên.",
+                 this->scan_prefix_.c_str(), sl.octet);
         sl.sock->close();
         sl.sock = nullptr;
         sl.active = false;
@@ -426,8 +490,9 @@ void LuxpowerTcp::scan_step_() {
   }
 
   // log tiến độ mỗi 64 IP
-  if ((this->scan_next_ % 64) == 0 && this->scan_next_ <= 254)
+  if ((this->scan_next_ % 64) == 0 && this->scan_next_ <= 254) {
     ESP_LOGD(TAG, "Quét ... %s%u", this->scan_prefix_.c_str(), this->scan_next_);
+  }
 
   // 3) quét xong mà không thấy gì
   bool any_active = false;
@@ -449,7 +514,24 @@ void LuxpowerTcp::scan_step_() {
     this->port_tries_ = 0;
     this->cur_port_ = this->port_;
     this->state_ = State::IDLE;
-    this->retry_after_ = millis() + 30000;
+    // Quét trượt KHÔNG có nghĩa dongle biến mất: lúc cạn socket nó bắt tay TCP rồi
+    // đóng ngay, không kịp đẩy frame nào nên bị loại ở bước nhận diện. Quay về IP
+    // đã lưu trong flash thay vì ngồi chờ rồi quét lại vô ích.
+    if (this->cand_count_ > 0) {
+      // Ưu tiên ứng viên "nhận rồi đóng ngay" — gần như chắc chắn là dongle đang bận
+      this->active_ip_ = this->scan_prefix_ + std::to_string(this->cand_octets_[0]);
+      for (uint8_t k = 1; k < this->cand_count_; k++)
+        this->cand_octets_[k - 1] = this->cand_octets_[k];
+      this->cand_count_--;
+      ESP_LOGI(TAG, "Thử lại ứng viên im lặng: %s", this->active_ip_.c_str());
+      this->retry_after_ = millis() + 3000;
+    } else if (!this->cache_ip_.empty()) {
+      this->active_ip_ = this->cache_ip_;
+      ESP_LOGI(TAG, "Quay lại IP đã lưu trong flash: %s", this->active_ip_.c_str());
+      this->retry_after_ = millis() + 5000;
+    } else {
+      this->retry_after_ = millis() + 30000;
+    }
   }
 }
 
@@ -463,6 +545,7 @@ void LuxpowerTcp::adopt_socket_(std::unique_ptr<socket::Socket> s, const std::st
   this->connected_at_ = millis();
   this->got_valid_frame_ = false;
   this->peer_closed_ = false;
+  this->link_ready_ = false;
   this->rx_len_ = 0;
   this->next_bank_ = 0;   // hỏi ngay khi vừa nối
   this->set_online_(true);
@@ -515,7 +598,9 @@ void LuxpowerTcp::poll_connect_() {
     this->connect_fails_++;
     ESP_LOGW(TAG, "Không kết nối được %s:%u", this->active_ip_.c_str(), this->cur_port_);
     // IP cache có thể đã đổi -> cho phép dò lại
-    if (this->cfg_host_.empty() && this->auto_discover_ && this->connect_fails_ >= 2) {
+    // IP lấy từ flash đã từng chạy được -> kiên nhẫn hơn nhiều trước khi vứt đi
+    uint8_t fail_limit = (!this->cache_ip_.empty() && this->active_ip_ == this->cache_ip_) ? 6 : 2;
+    if (this->cfg_host_.empty() && this->auto_discover_ && this->connect_fails_ >= fail_limit) {
       this->active_ip_.clear();
       ESP_LOGI(TAG, "Sẽ dò lại dongle trên mạng.");
     }
@@ -540,6 +625,7 @@ void LuxpowerTcp::pump_rx_() {
       want = budget;
     ssize_t got = this->sock_->read(this->rx_buf_ + this->rx_len_, want);
     if (got > 0) {
+      this->link_ready_ = true;  // có byte thật -> TCP đã established, hỏi được rồi
       this->rx_len_ += (size_t) got;
       budget -= (size_t) got;
       continue;
@@ -622,6 +708,8 @@ void LuxpowerTcp::drain_frames_() {
         // Frame dữ liệu hợp lệ -> publish ngay (dongle tự đẩy, ta không hỏi)
         this->last_data_ms_ = millis();
         this->ever_got_data_ = true;
+        this->silent_sessions_ = 0;
+        this->cache_ip_ = this->active_ip_;  // IP này cho dữ liệu thật -> đáng tin
         this->frames_total_count_++;
         if (this->frames_total_ != nullptr)
           this->frames_total_->publish_state(this->frames_total_count_);
@@ -669,8 +757,9 @@ bool LuxpowerTcp::parse_frame_(const uint8_t *buf, size_t len) {
 
   uint16_t crc_rx = buf[dend - 2] | (buf[dend - 1] << 8);
   uint16_t crc_calc = crc16_modbus_(buf + 20, (size_t) data_len - 2);
-  if (crc_rx != crc_calc)
+  if (crc_rx != crc_calc) {
     ESP_LOGD(TAG, "CRC lệch (rx=0x%04X calc=0x%04X) — vẫn parse", crc_rx, crc_calc);
+  }
 
   uint16_t reg_start = buf[32] | (buf[33] << 8);
 
@@ -747,11 +836,9 @@ void LuxpowerTcp::loop() {
       break;
 
     case State::CONNECTED: {
-      // THUẦN THỤ ĐỘNG: dongle Luxpower không trả lời request, nó tự đẩy frame
-      // rồi đóng kết nối. Ta chỉ đọc và nối lại.
-      this->send_next_request_();     // hỏi chủ động -> dongle trả lời ngay
-      if (this->state_ != State::CONNECTED || !this->sock_)
-        break;                        // gửi lỗi -> socket đã đóng, dừng vòng này
+      // ĐỌC TRƯỚC, HỎI SAU: byte đầu tiên chứng minh TCP đã established thật, và
+      // frame dongle tự đẩy ra là nguồn để học 2 serial. Dongle KHÔNG tự đẩy dữ
+      // liệu 0x04 — phải hỏi mới có, và chỉ có ~1,3 giây để hỏi.
       this->pump_rx_();
       this->drain_frames_();          // giải mã TRƯỚC khi đóng, tránh mất frame
       if (this->peer_closed_) {
@@ -759,12 +846,20 @@ void LuxpowerTcp::loop() {
         this->close_socket_("dongle đóng kết nối");
         break;
       }
+      // Dự phòng: dongle không đẩy gì thì sau 200 ms vẫn cứ hỏi.
+      if (!this->link_ready_ && millis() - this->connected_at_ >= 200)
+        this->link_ready_ = true;
+      this->send_next_request_();
+      if (this->state_ != State::CONNECTED || !this->sock_)
+        break;                        // gửi lỗi -> socket đã đóng, dừng vòng này
 
       // Nối được nhưng không phải dongle (không frame LXP nào) -> bỏ, dò tiếp
       if (!this->got_valid_frame_ && millis() - this->connected_at_ > NOT_DONGLE_MS) {
-        ESP_LOGW(TAG, "%s không gửi frame Luxpower nào — không phải dongle.",
-                 this->active_ip_.c_str());
-        if (this->cfg_host_.empty() && !this->ever_got_data_)
+        ESP_LOGW(TAG, "%s không gửi frame Luxpower nào.", this->active_ip_.c_str());
+        // Giữ lại IP đã từng cho dữ liệu: im lặng thường chỉ là dongle cạn socket,
+        // vứt IP đi sẽ kéo theo một vòng quét /24 dài vô ích.
+        bool trusted = this->ever_got_data_ || this->active_ip_ == this->cache_ip_;
+        if (this->cfg_host_.empty() && !trusted)
           this->active_ip_.clear();
         this->close_socket_("không phải dongle");
       }

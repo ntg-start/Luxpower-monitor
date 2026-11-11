@@ -138,6 +138,10 @@ class LuxpowerTcp : public PollingComponent {
   };
   ScanSlot slots_[SCAN_SLOTS];
   std::string scan_prefix_;
+  // IP bắt tay TCP được nhưng đóng ngay, không gửi byte nào: chữ ký của dongle
+  // đang cạn socket. Giữ lại để thử kỹ sau khi quét xong thay vì loại thẳng.
+  uint8_t cand_octets_[6]{};
+  uint8_t cand_count_{0};
   uint16_t scan_next_{1};
   uint8_t scan_skip_{0};
   bool tried_cached_{false};
@@ -151,6 +155,9 @@ class LuxpowerTcp : public PollingComponent {
   uint32_t last_data_ms_{0};   // lần cuối nhận frame 0x04 hợp lệ
   bool ever_got_data_{false};  // IP này đã từng cho dữ liệu thật
   bool cached_ok_{false};      // đã lưu IP/serial vào flash chưa
+  std::string cache_ip_;       // IP đã từng cho dữ liệu (nạp từ flash) — phương án quay về
+  bool link_ready_{false};     // đã nhận byte đầu -> TCP chắc chắn established
+  uint8_t silent_sessions_{0}; // số phiên liên tiếp nối được nhưng dongle im lặng
   bool peer_closed_{false};    // dongle đã đóng — đóng SAU khi giải mã hết buffer
 
   std::array<uint16_t, LUX_MAX_REG> regs_{};
