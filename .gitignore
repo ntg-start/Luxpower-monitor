@@ -2,4 +2,6 @@
 *.pyc
 __pycache__/
 secrets.yaml
+master.key
+*.key
 .venv/
