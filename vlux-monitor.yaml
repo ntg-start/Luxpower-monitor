@@ -18,6 +18,12 @@ substitutions:
   col_text:    "0xF1F5F9"   # chữ chính
   col_muted:   "0x8A9BB4"   # chữ phụ
   col_bad:     "0xEF4444"   # đỏ - mất kết nối
+  col_ok:      "0x22C55E"   # xanh - thành công
+  # Đưa mật khẩu vào dạng text để trang Cài đặt hiển thị được.
+  # (lambda là chuỗi thuần, không dùng được !secret trực tiếp bên trong)
+  s_ota_pw:    !secret ota_password
+  s_web_user:  !secret web_user
+  s_web_pw:    !secret web_password
 
 esphome:
   name: ${name}
@@ -42,6 +48,9 @@ external_components:
   - source:
       type: local
       path: components
+
+# Giữ lại kết quả quét WiFi để trang Cài đặt liệt kê được SSID
+vlux_settings:
 
 logger:
   level: INFO
@@ -130,8 +139,18 @@ touchscreen:
       y_max: 3860
     transform:
       swap_xy: false      # không xoay màn
-      mirror_x: false
+      # Tấm XPT2046 trên CYD trả trục X ngược chiều với panel: chạm bên trái ra
+      # toạ độ bên phải. Với nút to thì ít ai để ý, nhưng bàn phím LVGL 10 cột
+      # (mỗi phím ~24px) thì sai hoàn toàn. ESPHome xử lý bằng invert_x_:
+      # normalize_() lật ret = 0xfff - ret (touchscreen.cpp:160).
+      mirror_x: true
       mirror_y: false
+    # Cần đo lại toạ độ chạm? Bật tạm khối này rồi nạp:
+    # on_touch:
+    #   - logger.log:
+    #       level: WARN
+    #       format: "TOUCH x=%d y=%d  raw=%d,%d"
+    #       args: ['touch.x', 'touch.y', 'touch.x_raw', 'touch.y_raw']
 
 # ----------------------------------------------------------------------------
 #  Dữ liệu từ dongle Luxpower
@@ -377,6 +396,37 @@ script:
               str_sprintf("BAT %d%%  LOAD %d%%", pinp, 100 - pinp).c_str());
           lv_arc_set_value(id(arc_cons), pinp);
 
+  # ---- Trang Cài đặt: nạp giá trị hiện tại vào các nhãn ----
+  - id: fill_settings
+    then:
+      - lambda: |-
+          auto txt = [](text_sensor::TextSensor *s) -> std::string {
+            return (s != nullptr && s->has_state() && !s->state.empty())
+                     ? s->state : std::string("--");
+          };
+          lv_label_set_text(id(s_ip_dev),    txt(id(wifi_ip)).c_str());
+          lv_label_set_text(id(s_ssid_cur),  txt(id(wifi_ssid)).c_str());
+          lv_label_set_text(id(s_ip_dongle), txt(id(t_ip)).c_str());
+          lv_label_set_text(id(s_sn_dongle), txt(id(t_dsn)).c_str());
+          lv_label_set_text(id(s_devid),     vlux_settings::device_id().c_str());
+          bool show = id(show_secrets);
+          lv_label_set_text(id(s_web),
+              show ? "${s_web_user} / ${s_web_pw}" : "${s_web_user} / ********");
+          lv_label_set_text(id(s_ota), show ? "${s_ota_pw}" : "********");
+
+  # ---- Trang WiFi: nạp danh sách SSID từ lần quét gần nhất ----
+  - id: fill_wifi_list
+    then:
+      - lambda: |-
+          // dropdown là widget "compound": id() trả về LvDropdownType*, lv_obj_t
+          // nằm ở thành viên ->obj (khác label, id() trả thẳng lv_obj_t*)
+          lv_dropdown_set_options(id(dd_ssid)->obj, vlux_settings::ssid_options().c_str());
+          lv_dropdown_set_selected(id(dd_ssid)->obj, 0);
+          lv_label_set_text(id(lbl_wifi_msg),
+              vlux_settings::ssid_count() == 0
+                ? "Chua co ket qua quet - bam QUET LAI"
+                : "Chon mang roi nhap mat khau");
+
 globals:
   # 0 = chua co du lieu (dung PV suy ra), 1 = nang, 2 = nhieu may, 3 = mua
   - id: wx_code
@@ -391,6 +441,17 @@ globals:
   - id: last_data_ms
     type: uint32_t
     initial_value: '0'
+  # Trang Cài đặt: mật khẩu che mặc định, chạm để hiện
+  - id: show_secrets
+    type: bool
+    initial_value: 'false'
+  # Lựa chọn tạm khi đổi WiFi
+  - id: sel_ssid
+    type: std::string
+    initial_value: '""'
+  - id: sel_pw
+    type: std::string
+    initial_value: '""'
 
 binary_sensor:
   - platform: status
@@ -401,6 +462,9 @@ text_sensor:
     ip_address:
       name: "IP"
       id: wifi_ip
+    ssid:
+      name: "SSID"
+      id: wifi_ssid
 
 
 # ----------------------------------------------------------------------------
@@ -410,7 +474,16 @@ lvgl:
   on_idle:
     timeout: 10s
     then:
-      - lvgl.page.show: page_idle
+      # Đang ở trang Cài đặt / WiFi thì KHÔNG nhảy về màn chờ — người dùng có thể
+      # đang đọc thông tin hoặc gõ mật khẩu, 10 giây là quá ngắn.
+      - if:
+          condition:
+            not:
+              or:
+                - lvgl.page.is_showing: page_settings
+                - lvgl.page.is_showing: page_wifi
+          then:
+            - lvgl.page.show: page_idle
   displays:
     - main_display
   touchscreens:
@@ -1050,6 +1123,29 @@ lvgl:
             clickable: true
             on_click:
               - lvgl.page.next:
+
+        # Link CÀI ĐẶT — khai báo SAU lớp phủ chuyển trang nên nằm ĐÈ lên nó,
+        # nhờ vậy chạm vào đây không bị hiểu thành "chuyển trang".
+        - obj:
+            x: 86
+            y: 299
+            width: 68
+            height: 18
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 9
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - script.execute: fill_settings
+              - lvgl.page.show: page_settings
+            widgets:
+              - label:
+                  text: "CAI DAT"
+                  text_color: ${col_muted}
+                  text_font: montserrat_10
+                  align: CENTER
 
     # ======================= TRANG CHỜ =======================
     - id: page_idle
@@ -1816,6 +1912,365 @@ lvgl:
             clickable: true
             on_click:
               - lvgl.page.show: page_main
+
+    # ======================= TRANG CÀI ĐẶT =======================
+    # skip: true -> không nằm trong vòng chạm-để-chuyển-trang của 2 trang chính
+    - id: page_settings
+      skip: true
+      bg_color: ${col_bg}
+      widgets:
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 26
+            styles: topbar
+            widgets:
+              - label:
+                  text: "CAI DAT"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: CENTER
+
+        # ---- WiFi đang dùng ----
+        - label:
+            x: 8
+            y: 32
+            text: "WIFI DANG DUNG"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_ssid_cur
+            x: 8
+            y: 45
+            text: "--"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- IP mạch ----
+        - label:
+            x: 8
+            y: 64
+            text: "IP MACH"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_ip_dev
+            x: 8
+            y: 77
+            text: "--"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- IP dongle ----
+        - label:
+            x: 8
+            y: 96
+            text: "IP DONGLE"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_ip_dongle
+            x: 8
+            y: 109
+            text: "--"
+            text_color: ${col_pv}
+            text_font: montserrat_12
+        # ---- SN dongle ----
+        - label:
+            x: 8
+            y: 128
+            text: "SN DONGLE"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_sn_dongle
+            x: 8
+            y: 141
+            text: "--"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- Đăng nhập web ----
+        - label:
+            x: 8
+            y: 160
+            text: "DANG NHAP WEB"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_web
+            x: 8
+            y: 173
+            text: "--"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- Mật khẩu OTA ----
+        - label:
+            x: 8
+            y: 192
+            text: "MAT KHAU OTA"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_ota
+            x: 8
+            y: 205
+            text: "********"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- Mã thiết bị ----
+        - label:
+            x: 8
+            y: 224
+            text: "MA THIET BI"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            id: s_devid
+            x: 8
+            y: 237
+            text: "--"
+            text_color: ${col_text}
+            text_font: montserrat_12
+        # ---- Kích hoạt ----
+        - label:
+            x: 8
+            y: 256
+            text: "KICH HOAT"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - label:
+            x: 8
+            y: 269
+            text: "Dang phat trien"
+            text_color: ${col_grid}
+            text_font: montserrat_12
+
+        # ---- Hàng nút ----
+        - button:
+            id: btn_wifi
+            x: 6
+            y: 290
+            width: 72
+            height: 26
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  text: "WIFI"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: ${col_text}
+            on_click:
+              - script.execute: fill_wifi_list
+              - lvgl.page.show: page_wifi
+        - button:
+            id: btn_reveal
+            x: 84
+            y: 290
+            width: 72
+            height: 26
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  id: lbl_reveal
+                  text: "HIEN"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: ${col_text}
+            on_click:
+              # Mật khẩu che mặc định: ai đi ngang qua cũng đọc được màn hình,
+              # mà mật khẩu OTA thì cho phép nạp firmware tuỳ ý vào máy.
+              - lambda: 'id(show_secrets) = !id(show_secrets);'
+              - lvgl.label.update:
+                  id: lbl_reveal
+                  text: !lambda 'return std::string(id(show_secrets) ? "AN" : "HIEN");'
+              - script.execute: fill_settings
+        - button:
+            id: btn_close
+            x: 162
+            y: 290
+            width: 72
+            height: 26
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  text: "DONG"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: ${col_text}
+            on_click:
+              # Rời trang là che lại ngay, không để lộ sau lưng
+              - lambda: 'id(show_secrets) = false;'
+              - lvgl.label.update:
+                  id: lbl_reveal
+                  text: "HIEN"
+              - lvgl.page.show: page_main
+
+    # ======================= TRANG CHỌN WIFI =======================
+    - id: page_wifi
+      skip: true
+      bg_color: ${col_bg}
+      widgets:
+        - obj:
+            x: 0
+            y: 0
+            width: 240
+            height: 26
+            styles: topbar
+            widgets:
+              - label:
+                  text: "CHON WIFI"
+                  text_color: ${col_text}
+                  text_font: montserrat_14
+                  align: CENTER
+
+        - label:
+            x: 8
+            y: 28
+            text: "MANG"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+        - dropdown:
+            id: dd_ssid
+            x: 6
+            y: 40
+            width: 228
+            height: 28
+            options:
+              - "(chua quet)"
+            text_font: montserrat_12
+
+        - textarea:
+            id: ta_pw
+            x: 6
+            y: 72
+            width: 228
+            height: 28
+            one_line: true
+            password_mode: true
+            max_length: 63
+            placeholder_text: "Mat khau WiFi"
+            text_font: montserrat_12
+
+        - button:
+            id: btn_rescan
+            x: 6
+            y: 104
+            width: 74
+            height: 26
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  text: "QUET LAI"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: ${col_text}
+            on_click:
+              # ESPHome chỉ quét trong lúc đi nối. Tắt/bật lại WiFi là cách được
+              # hỗ trợ để ép quét mới — đổi lại mất kết nối vài giây.
+              - lvgl.label.update:
+                  id: lbl_wifi_msg
+                  text: "Dang quet, mat ket noi vai giay..."
+              - wifi.disable:
+              - delay: 1s
+              - wifi.enable:
+              - delay: 8s
+              - script.execute: fill_wifi_list
+        - button:
+            id: btn_connect
+            x: 84
+            y: 104
+            width: 74
+            height: 26
+            bg_color: ${col_pv}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  text: "KET NOI"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: 0x0B1220
+            on_click:
+              - lambda: |-
+                  char buf[40];
+                  lv_dropdown_get_selected_str(id(dd_ssid)->obj, buf, sizeof(buf));
+                  id(sel_ssid) = std::string(buf);
+                  id(sel_pw) = std::string(lv_textarea_get_text(id(ta_pw)));
+              - lvgl.label.update: {id: lbl_wifi_msg, text: "Dang ket noi..."}
+              - wifi.configure:
+                  ssid: !lambda 'return id(sel_ssid);'
+                  password: !lambda 'return id(sel_pw);'
+                  save: true
+                  timeout: 20s
+                  on_connect:
+                    - lvgl.label.update:
+                        id: lbl_wifi_msg
+                        text: !lambda 'return "OK: " + id(sel_ssid);'
+                    - lambda: 'id(sel_pw).clear();'
+                    - lvgl.textarea.update:
+                        id: ta_pw
+                        text: ""
+                  on_error:
+                    - lvgl.label.update:
+                        id: lbl_wifi_msg
+                        text: "That bai - kiem tra mat khau"
+                    - lambda: 'id(sel_pw).clear();'
+        - button:
+            id: btn_wifi_back
+            x: 162
+            y: 104
+            width: 72
+            height: 26
+            bg_color: ${col_card2}
+            bg_opa: COVER
+            radius: 8
+            border_width: 0
+            widgets:
+              - label:
+                  text: "QUAY LAI"
+                  align: CENTER
+                  text_font: montserrat_10
+                  text_color: ${col_text}
+            on_click:
+              - lvgl.textarea.update:
+                  id: ta_pw
+                  text: ""
+              - lambda: 'id(sel_pw).clear();'
+              - script.execute: fill_settings
+              - lvgl.page.show: page_settings
+
+        - label:
+            id: lbl_wifi_msg
+            x: 8
+            y: 134
+            text: "Chon mang roi nhap mat khau"
+            text_color: ${col_muted}
+            text_font: montserrat_10
+
+        - keyboard:
+            id: kb_pw
+            # KHÔNG đặt x/y tuyệt đối ở đây. Constructor của LVGL đã gọi sẵn
+            # lv_obj_align(obj, LV_ALIGN_BOTTOM_MID, 0, 0) cho keyboard
+            # (lv_keyboard.c:453), nên x/y trở thành ĐỘ LỆCH so với mốc đáy chứ
+            # không phải toạ độ màn hình — đặt y:162 đẩy bàn phím xuống 162px
+            # DƯỚI mép dưới, gần như mất hút.
+            align: BOTTOM_MID
+            width: 240
+            height: 180
+            mode: TEXT_LOWER
+            textarea: ta_pw
 
 # Hoạt hình dòng điện + đồng hồ
 interval:
